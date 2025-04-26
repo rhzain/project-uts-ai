@@ -1,0 +1,51 @@
+Wahana,Kapasitas,Pasien Normal,Pasien Gangguan,Bidang Penyakit,Kategori Pekerjaan
+RS_01,8,82,133,"Muskuloskeletal, Endokrin",Spesialis
+RS_02,4,90,51,"Endokrin, Neurologi, Muskuloskeletal","Spesialis, Bedah"
+RS_03,8,75,123,"Muskuloskeletal, Pernapasan, Infeksi",Bedah
+RS_04,4,47,129,"Neurologi, Infeksi, Kanker",Spesialis
+RS_05,6,50,149,"Pernapasan, Gastrointestinal, Kulit dan Kelamin","Umum, Bedah"
+RS_06,5,61,112,"Kulit dan Kelamin, Kardiovaskular",Bedah
+RS_07,7,49,32,"Infeksi, Pernapasan",Bedah
+RS_08,7,50,53,"Neurologi, Muskuloskeletal, Gastrointestinal",Umum
+RS_09,8,69,100,"Endokrin, Neurologi",Umum
+RS_10,4,88,94,"Pernapasan, Kardiovaskular",Umum
+RS_11,4,76,51,"Muskuloskeletal, Gastrointestinal, Endokrin",Bedah
+RS_12,6,86,53,"Kulit dan Kelamin, Gastrointestinal, Reproduksi","Spesialis, Umum"
+RS_13,7,62,144,"Infeksi, Kulit dan Kelamin",Bedah
+RS_14,7,90,125,"Muskuloskeletal, Gastrointestinal",Umum
+RS_15,5,89,22,"Gastrointestinal, Reproduksi, Kanker","Bedah, Umum"
+RS_16,8,88,87,"Kanker, Kardiovaskular",Spesialis
+RS_17,2,90,124,"Muskuloskeletal, Neurologi, Gastrointestinal",Bedah
+RS_18,6,80,88,"Endokrin, Infeksi, Neurologi",Bedah
+RS_19,5,58,75,"Pernapasan, Muskuloskeletal, Kardiovaskular","Spesialis, Umum"
+RS_20,6,64,53,"Reproduksi, Kanker, Neurologi",Umum
+RS_21,4,78,74,"Infeksi, Muskuloskeletal, Kanker",Umum
+RS_22,7,40,17,"Kardiovaskular, Pernapasan, Reproduksi","Bedah, Spesialis"
+RS_23,2,77,10,"Reproduksi, Kanker, Kulit dan Kelamin",Bedah
+RS_24,2,78,53,"Endokrin, Infeksi",Umum
+RS_25,4,81,40,"Neurologi, Kanker",Umum
+RS_26,8,37,71,"Reproduksi, Gastrointestinal",Umum
+RS_27,6,81,62,"Gastrointestinal, Reproduksi",Bedah
+RS_28,2,51,122,"Kanker, Kardiovaskular",Umum
+RS_29,4,96,31,"Pernapasan, Muskuloskeletal",Bedah
+RS_30,6,91,45,"Pernapasan, Endokrin, Gastrointestinal",Umum
+RS_31,5,32,61,"Pernapasan, Neurologi, Infeksi","Bedah, Spesialis"
+RS_32,2,84,15,"Gastrointestinal, Endokrin","Bedah, Umum"
+RS_33,8,97,61,"Reproduksi, Pernapasan, Kanker","Spesialis, Umum"
+RS_34,4,99,112,"Reproduksi, Kardiovaskular, Neurologi","Umum, Spesialis"
+RS_35,8,42,67,"Gastrointestinal, Pernapasan",Umum
+RS_36,8,82,112,"Kulit dan Kelamin, Infeksi",Umum
+RS_37,8,90,83,"Endokrin, Kanker, Neurologi",Spesialis
+RS_38,6,43,72,"Kulit dan Kelamin, Kardiovaskular",Spesialis
+RS_39,2,73,27,"Kanker, Endokrin","Umum, Spesialis"
+RS_40,4,79,116,"Neurologi, Reproduksi",Spesialis
+RS_41,3,37,115,"Neurologi, Infeksi","Umum, Spesialis"
+RS_42,3,56,136,"Pernapasan, Gastrointestinal, Endokrin",Spesialis
+RS_43,2,73,139,"Neurologi, Reproduksi, Muskuloskeletal","Spesialis, Bedah"
+RS_44,3,56,31,"Kardiovaskular, Neurologi, Pernapasan","Bedah, Umum"
+RS_45,2,96,132,"Kanker, Neurologi",Spesialis
+RS_46,2,42,80,"Reproduksi, Neurologi, Muskuloskeletal",Spesialis
+RS_47,8,34,17,"Reproduksi, Kardiovaskular, Pernapasan","Umum, Bedah"
+RS_48,4,65,34,"Infeksi, Muskuloskeletal",Spesialis
+RS_49,7,49,80,"Kardiovaskular, Kulit dan Kelamin",Bedah
+RS_50,7,35,69,"Kardiovaskular, Endokrin","Bedah, Umum"
