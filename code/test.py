@@ -835,253 +835,284 @@ def main():
                 )
     
     with tab3:
-        st.header("Simulasi Gangguan dan Penyesuaian")
+        st.header("Simulasi Gangguan")
         
         if not st.session_state.penjadwalan_done:
             st.warning("Silakan lakukan penjadwalan awal terlebih dahulu di tab Penjadwalan Awal")
         else:
-            # Tampilkan status awal (normal) dalam tabel pertama
-            st.subheader("📊 Status Wahana Awal (Kondisi Normal)")
-            
-            # Buat DataFrame untuk status awal (normal)
-            status_normal = st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Kapasitas Optimal', 'Pasien Normal']]
-            
-            # Buat tabel yang lebih informatif
-            status_normal_detail = pd.DataFrame()
-            status_normal_detail['Nama Wahana'] = status_normal['Nama Wahana']
-            status_normal_detail['Kategori Pekerjaan'] = status_normal['Kategori Pekerjaan']
-            status_normal_detail['Kapasitas'] = status_normal['Kapasitas Optimal']
-            status_normal_detail['Pasien'] = status_normal['Pasien Normal']
-            
-            # Tambahkan kolom Rasio dan Status
-            status_normal_detail['Rasio Pasien/Kapasitas'] = status_normal['Pasien Normal'] / status_normal['Kapasitas Optimal']
-            
-            # Tentukan status berdasarkan rasio
-            def tentukan_status(rasio):
-                if rasio == 0:
-                    return 'Tutup'
-                elif rasio < 5:
-                    return 'Underutilized'
-                elif rasio > 20:
-                    return 'Overload'
-                else:
-                    return 'Stabil'
-            
-            status_normal_detail['Status'] = status_normal_detail['Rasio Pasien/Kapasitas'].apply(tentukan_status)
-            
-            # Tampilkan tabel dengan conditional formatting
-            st.dataframe(
-                status_normal_detail.style.apply(
-                    lambda x: ['background-color: #008000' if x['Status'] == 'Stabil' 
-                            else 'background-color: #FF0000' if x['Status'] == 'Underutilized'
-                            else 'background-color: #FF0000' if x['Status'] == 'Overload'
-                            else 'background-color: #008000' for _ in x],
-                    axis=1
-                ),
-                use_container_width=True
-            )
-            
-            # Visualisasi distribusi status normal
-            st.write("### Distribusi Status Wahana (Kondisi Normal)")
-            distribusi_normal = status_normal_detail['Status'].value_counts().reset_index()
-            distribusi_normal.columns = ['Status', 'Jumlah']
-            
-            fig_normal = px.pie(
-                distribusi_normal, 
-                values='Jumlah', 
-                names='Status', 
-                title="Distribusi Status Wahana Normal",
-                color='Status',
-                color_discrete_map={
-                    'Stabil': '#4CAF50',
-                    'Underutilized': '#FF9800', 
-                    'Overload': '#F44336',
-                    'Tutup': '#9E9E9E'
-                }
-            )
-            st.plotly_chart(fig_normal, use_container_width=True)
-
             # Button untuk simulasi gangguan
-            if st.button("Simulasikan Gangguan"):
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                simulate_button = st.button("Simulasikan Gangguan", use_container_width=True)
+            
+            if simulate_button:
                 with st.spinner('Sedang mensimulasikan gangguan...'):
                     try:
                         st.session_state.sistem.simulasikan_gangguan()
                         st.session_state.gangguan_done = True
-                        
                         st.success("Simulasi gangguan berhasil dilakukan!")
                     except Exception as e:
                         st.error(f"Gagal mensimulasikan gangguan: {str(e)}")
+                        st.stop()
             
-            # Tampilkan status setelah gangguan jika sudah disimulasikan
+            # Tampilkan hasil simulasi gangguan setelah tombol ditekan atau jika sudah pernah disimulasikan
             if st.session_state.gangguan_done:
-                st.subheader("🚨 Status Wahana Setelah Gangguan")
-                
-                # Buat DataFrame untuk status setelah gangguan
+                # Data untuk visualisasi
+                status_normal = st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Kapasitas Optimal', 'Pasien Normal']]
                 status_gangguan = st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Kapasitas Optimal', 'Pasien Gangguan', 'Status Gangguan']]
                 
-                # Buat tabel yang lebih informatif
-                status_gangguan_detail = pd.DataFrame()
-                status_gangguan_detail['Nama Wahana'] = status_gangguan['Nama Wahana']
-                status_gangguan_detail['Kategori Pekerjaan'] = status_gangguan['Kategori Pekerjaan']
-                status_gangguan_detail['Kapasitas'] = status_gangguan['Kapasitas Optimal']
-                status_gangguan_detail['Pasien Gangguan'] = status_gangguan['Pasien Gangguan']
-                status_gangguan_detail['Rasio Pasien/Kapasitas'] = status_gangguan['Pasien Gangguan'] / status_gangguan['Kapasitas Optimal']
-                status_gangguan_detail['Status'] = status_gangguan['Status Gangguan']
+                # Persiapkan data untuk tab
+                tabs_gangguan = st.tabs(["Status Wahana", "Perbandingan Pasien", "Rasio Pasien/Peserta"])
                 
-                # Tambahkan kolom perubahan
-                status_gangguan_detail['Perubahan Pasien'] = status_gangguan['Pasien Gangguan'] - status_normal['Pasien Normal']
-                
-                # Tampilkan tabel dengan conditional formatting
-                st.dataframe(
-                    status_gangguan_detail.style.apply(
-                        lambda x: ['background-color: #008000' if x['Status'] == 'Stabil' 
-                                else 'background-color: #FF0000' if x['Status'] == 'Underutilized'
-                                else 'background-color: #ffe6e6' if x['Status'] == 'Overload'
-                                else 'background-color: #e6e6e6' for _ in x],
+                # TAB 1: Status Wahana (tampilan pie chart)
+                with tabs_gangguan[0]:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Status Wahana Normal")
+                        
+                        # Hitung status normal berdasarkan rasio
+                        status_normal_detail = pd.DataFrame()
+                        status_normal_detail['Rasio Pasien/Kapasitas'] = status_normal['Pasien Normal'] / status_normal['Kapasitas Optimal']
+                        
+                        # Tentukan status berdasarkan rasio
+                        def tentukan_status(rasio):
+                            if rasio == 0:
+                                return 'Tutup'
+                            elif rasio < 5:
+                                return 'Underutilized'
+                            elif rasio > 20:
+                                return 'Overload'
+                            else:
+                                return 'Stabil'
+                        
+                        status_normal_detail['Status'] = status_normal_detail['Rasio Pasien/Kapasitas'].apply(tentukan_status)
+                        
+                        # Visualisasi distribusi status normal
+                        distribusi_normal = status_normal_detail['Status'].value_counts().reset_index()
+                        distribusi_normal.columns = ['Status', 'Jumlah']
+                        
+                        fig_normal = px.pie(
+                            distribusi_normal, 
+                            values='Jumlah', 
+                            names='Status', 
+                            title="Status Wahana Kondisi Normal",
+                            color='Status',
+                            color_discrete_map={
+                                'Stabil': '#27AE60',
+                                'Underutilized': '#F39C12', 
+                                'Overload': '#C0392B',
+                                'Tutup': '#7F8C8D'
+                            }
+                        )
+                        st.plotly_chart(fig_normal, use_container_width=True)
+                    
+                    with col2:
+                        st.subheader("Status Wahana Setelah Gangguan")
+                        
+                        # Visualisasi distribusi status gangguan
+                        distribusi_gangguan = status_gangguan['Status Gangguan'].value_counts().reset_index()
+                        distribusi_gangguan.columns = ['Status', 'Jumlah']
+                        
+                        fig_gangguan = px.pie(
+                            distribusi_gangguan, 
+                            values='Jumlah', 
+                            names='Status', 
+                            title="Status Wahana Setelah Gangguan",
+                            color='Status',
+                            color_discrete_map={
+                                'Stabil': '#27AE60',
+                                'Underutilized': '#F39C12', 
+                                'Overload': '#C0392B',
+                                'Tutup': '#7F8C8D'
+                            }
+                        )
+                        st.plotly_chart(fig_gangguan, use_container_width=True)
+                    
+                    # Tampilkan tabel perubahan status
+                    st.subheader("Perubahan Status Wahana")
+                    perubahan_status = pd.DataFrame()
+                    perubahan_status['Nama Wahana'] = status_normal['Nama Wahana']
+                    perubahan_status['Kategori'] = status_normal['Kategori Pekerjaan']
+                    perubahan_status['Status Normal'] = status_normal_detail['Status']
+                    perubahan_status['Status Gangguan'] = status_gangguan['Status Gangguan']
+                    perubahan_status['Perubahan'] = perubahan_status.apply(
+                        lambda x: '✓ Tetap' if x['Status Normal'] == x['Status Gangguan'] else '⚠️ Berubah',
                         axis=1
-                    ).background_gradient(subset=['Perubahan Pasien'], cmap='RdYlGn_r'),
-                    use_container_width=True
-                )
+                    )
+                    
+                    st.dataframe(
+                        perubahan_status.style.apply(
+                            lambda x: ['background-color: #27AE60; color: white' if x['Status Gangguan'] == 'Stabil'
+                                    else 'background-color: #F39C12; color: black' if x['Status Gangguan'] == 'Underutilized'
+                                    else 'background-color: #C0392B; color: white' if x['Status Gangguan'] == 'Overload'
+                                    else 'background-color: #7F8C8D; color: white' for _ in x],
+                            axis=1
+                        ),
+                        use_container_width=True
+                    )
                 
-                # Visualisasi perbandingan status
-                st.write("### Distribusi Status Wahana (Setelah Gangguan)")
-                distribusi_gangguan = status_gangguan_detail['Status'].value_counts().reset_index()
-                distribusi_gangguan.columns = ['Status', 'Jumlah']
+                # TAB 2: Perbandingan Jumlah Pasien (normal vs gangguan)
+                with tabs_gangguan[1]:
+                    st.subheader("Perbandingan Jumlah Pasien Normal vs Gangguan")
+                    
+                    # Buat DataFrame untuk perbandingan
+                    perbandingan_df = pd.DataFrame({
+                        'Nama Wahana': status_normal['Nama Wahana'],
+                        'Pasien Normal': status_normal['Pasien Normal'],
+                        'Pasien Gangguan': status_gangguan['Pasien Gangguan']
+                    })
+                    
+                    # Hitung perubahan jumlah pasien
+                    perbandingan_df['Perubahan'] = perbandingan_df['Pasien Gangguan'] - perbandingan_df['Pasien Normal']
+                    perbandingan_df['Persen Perubahan'] = (perbandingan_df['Perubahan'] / perbandingan_df['Pasien Normal'] * 100).round(1)
+                    perbandingan_df['Persen Perubahan'] = perbandingan_df['Persen Perubahan'].replace([float('inf'), float('-inf')], 0)
+                    
+                    # Visualisasi bar chart perbandingan
+                    fig_perbandingan = px.bar(
+                        perbandingan_df,
+                        x='Nama Wahana',
+                        y=['Pasien Normal', 'Pasien Gangguan'],
+                        barmode='group',
+                        title='Perbandingan Jumlah Pasien Normal vs Gangguan',
+                        labels={'value': 'Jumlah Pasien', 'variable': 'Kondisi'},
+                        color_discrete_map={
+                            'Pasien Normal': '#3498DB',  # Biru
+                            'Pasien Gangguan': '#E74C3C'  # Merah
+                        }
+                    )
+                    st.plotly_chart(fig_perbandingan, use_container_width=True)
+                    
+                    # Tampilkan tabel detail perubahan dengan persentase
+                    st.subheader("Detail Perubahan Jumlah Pasien")
+                    
+                    st.dataframe(
+                        perbandingan_df.style.background_gradient(
+                            subset=['Perubahan', 'Persen Perubahan'],
+                            cmap='RdYlGn_r'
+                        ),
+                        use_container_width=True
+                    )
                 
-                fig_gangguan = px.pie(
-                    distribusi_gangguan, 
-                    values='Jumlah', 
-                    names='Status', 
-                    title="Distribusi Status Wahana Setelah Gangguan",
-                    color='Status',
-                    color_discrete_map={
-                        'Stabil': '#4CAF50',
-                        'Underutilized': '#FF9800', 
-                        'Overload': '#F44336',
-                        'Tutup': '#9E9E9E'
-                    }
-                )
-                st.plotly_chart(fig_gangguan, use_container_width=True)
+                # TAB 3: Rasio Pasien/Peserta
+                with tabs_gangguan[2]:
+                    st.subheader("Rasio Pasien per Peserta")
+                    
+                    # Buat DataFrame untuk visualisasi rasio
+                    rasio_df = pd.DataFrame()
+                    rasio_df['Nama Wahana'] = status_normal['Nama Wahana']
+                    
+                    # Hitung jumlah peserta per wahana dari penjadwalan awal
+                    jumlah_peserta = {}
+                    for wahana in status_normal['Nama Wahana']:
+                        jumlah_peserta[wahana] = sum(1 for w in st.session_state.sistem.penempatan_awal.values() if w == wahana)
+                    
+                    rasio_df['Jumlah Peserta'] = rasio_df['Nama Wahana'].map(jumlah_peserta)
+                    rasio_df['Pasien Normal'] = status_normal['Pasien Normal']
+                    rasio_df['Pasien Gangguan'] = status_gangguan['Pasien Gangguan']
+                    
+                    # Hitung rasio
+                    rasio_df['Rasio Normal'] = rasio_df.apply(
+                        lambda x: x['Pasien Normal'] / x['Jumlah Peserta'] if x['Jumlah Peserta'] > 0 else 0, 
+                        axis=1
+                    )
+                    rasio_df['Rasio Gangguan'] = rasio_df.apply(
+                        lambda x: x['Pasien Gangguan'] / x['Jumlah Peserta'] if x['Jumlah Peserta'] > 0 else 0, 
+                        axis=1
+                    )
+                    
+                    # Visualisasi rasio
+                    fig_rasio = px.bar(
+                        rasio_df,
+                        x='Nama Wahana',
+                        y=['Rasio Normal', 'Rasio Gangguan'],
+                        barmode='group',
+                        title='Rasio Pasien per Peserta (Normal vs Gangguan)',
+                        labels={'value': 'Rasio Pasien/Peserta', 'variable': 'Kondisi'}
+                    )
+                    
+                    # Tambahkan garis threshold Underutilized dan Overload
+                    fig_rasio.add_shape(
+                        type="line",
+                        x0=-0.5,
+                        y0=5,
+                        x1=len(rasio_df)-0.5,
+                        y1=5,
+                        line=dict(color="orange", width=2, dash="dash"),
+                        name="Threshold Underutilized"
+                    )
+                    
+                    fig_rasio.add_shape(
+                        type="line",
+                        x0=-0.5,
+                        y0=20,
+                        x1=len(rasio_df)-0.5,
+                        y1=20,
+                        line=dict(color="red", width=2, dash="dash"),
+                        name="Threshold Overload"
+                    )
+                    
+                    # Menambahkan anotasi untuk threshold
+                    fig_rasio.add_annotation(
+                        x=0,
+                        y=5,
+                        text="Underutilized Threshold (5)",
+                        showarrow=False,
+                        yshift=10
+                    )
+                    
+                    fig_rasio.add_annotation(
+                        x=0,
+                        y=20,
+                        text="Overload Threshold (20)",
+                        showarrow=False,
+                        yshift=10
+                    )
+                    
+                    st.plotly_chart(fig_rasio, use_container_width=True)
+                    
+                    # Tampilkan tabel detail rasio
+                    st.subheader("Detail Rasio Pasien per Peserta")
+                    
+                    # Format rasio dengan 2 desimal dan tambahkan status
+                    rasio_df['Rasio Normal'] = rasio_df['Rasio Normal'].round(2)
+                    rasio_df['Rasio Gangguan'] = rasio_df['Rasio Gangguan'].round(2)
+                    
+                    rasio_df['Status Normal'] = rasio_df['Rasio Normal'].apply(tentukan_status)
+                    rasio_df['Status Gangguan'] = rasio_df['Rasio Gangguan'].apply(tentukan_status)
+                    
+                    st.dataframe(
+                        rasio_df.style.apply(
+                            lambda x: ['background-color: #27AE60; color: white' if x['Status Gangguan'] == 'Stabil'
+                                    else 'background-color: #F39C12; color: black' if x['Status Gangguan'] == 'Underutilized'
+                                    else 'background-color: #C0392B; color: white' if x['Status Gangguan'] == 'Overload'
+                                    else 'background-color: #7F8C8D; color: white' for _ in x],
+                            axis=1
+                        ),
+                        use_container_width=True
+                    )
                 
-                # Visualisasi perbandingan pasien normal vs gangguan
-                st.write("### Perbandingan Pasien Normal vs Gangguan")
+                # Tampilkan informasi ke pengguna untuk melanjutkan ke tab 4
+                st.info("👉 Silakan lanjutkan ke tab **Hasil Akhir** untuk melakukan penyesuaian penempatan berdasarkan simulasi gangguan ini.")
+            else:
+                # Tampilkan informasi status awal
+                st.subheader("📊 Status Wahana Awal (Kondisi Normal)")
                 
-                # Buat DataFrame untuk perbandingan
-                perbandingan_df = pd.DataFrame({
-                    'Nama Wahana': status_normal['Nama Wahana'],
-                    'Pasien Normal': status_normal['Pasien Normal'],
-                    'Pasien Gangguan': status_gangguan['Pasien Gangguan']
-                })
+                # Buat DataFrame untuk status awal (normal)
+                status_normal = st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Kapasitas Optimal', 'Pasien Normal']]
                 
-                fig_perbandingan = px.bar(
-                    perbandingan_df,
-                    x='Nama Wahana',
-                    y=['Pasien Normal', 'Pasien Gangguan'],
-                    barmode='group',
-                    title='Perbandingan Jumlah Pasien Normal vs Gangguan',
-                    labels={'value': 'Jumlah Pasien', 'variable': 'Kondisi'}
-                )
-                st.plotly_chart(fig_perbandingan, use_container_width=True)
+                # Buat tabel yang lebih informatif
+                status_normal_detail = pd.DataFrame()
+                status_normal_detail['Nama Wahana'] = status_normal['Nama Wahana']
+                status_normal_detail['Kategori Pekerjaan'] = status_normal['Kategori Pekerjaan']
+                status_normal_detail['Kapasitas'] = status_normal['Kapasitas Optimal']
+                status_normal_detail['Pasien'] = status_normal['Pasien Normal']
                 
-                # Tombol untuk melakukan penyesuaian
-                if st.button("Lakukan Penyesuaian Penempatan"):
-                    with st.spinner('Sedang menyesuaikan penempatan...'):
-                        try:
-                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif()
-                            st.session_state.penyesuaian_done = True
-                            
-                            st.success("Penyesuaian penempatan berhasil dilakukan!")
-                            
-                            # Tampilkan hasil
-                            st.subheader("Distribusi Peserta per Wahana (Setelah Penyesuaian)")
-                            distribusi_akhir = pd.Series(penempatan_akhir.values()).value_counts().reset_index()
-                            distribusi_akhir.columns = ['Nama Wahana', 'Jumlah Peserta']
-                            
-                            # Buat visualisasi distribusi baru
-                            fig_distribusi = px.bar(
-                                distribusi_akhir,
-                                x='Nama Wahana',
-                                y='Jumlah Peserta',
-                                color='Jumlah Peserta',
-                                title='Distribusi Peserta Setelah Penyesuaian'
-                            )
-                            st.plotly_chart(fig_distribusi, use_container_width=True)
-                            
-                            # Simpan hasil di session state
-                            st.session_state.distribusi_akhir = distribusi_akhir
-                        except Exception as e:
-                            st.error(f"Gagal melakukan penyesuaian: {str(e)}")
-    
-    with tab4:
-        st.header("Hasil Akhir")
-        
-        if not st.session_state.penyesuaian_done:
-            st.warning("Silakan selesaikan proses penjadwalan dan penyesuaian terlebih dahulu")
-        else:
-            try:
-                # Tampilkan statistik penjadwalan awal
-                st.subheader("📊 Statistik Penjadwalan")
+                # Tambahkan kolom Rasio dan Status
+                status_normal_detail['Rasio Pasien/Kapasitas'] = status_normal['Pasien Normal'] / status_normal['Kapasitas Optimal']
                 
-                # Buat baris metrik untuk perbandingan
-                col1, col2, col3 = st.columns(3)
-                
-                # Hitung statistik awal dan akhir
-                peserta_awal = len(st.session_state.sistem.penempatan_awal)
-                peserta_akhir = len(st.session_state.sistem.penempatan_akhir)
-                
-                # Hitung match preferensi awal
-                match_awal = 0
-                for peserta_id, wahana in st.session_state.sistem.penempatan_awal.items():
-                    peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
-                    wahana_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana].iloc[0]
-                    if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
-                        match_awal += 1
-                
-                # Hitung match preferensi akhir
-                match_akhir = 0
-                for peserta_id, wahana in st.session_state.sistem.penempatan_akhir.items():
-                    peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
-                    wahana_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana].iloc[0]
-                    if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
-                        match_akhir += 1
-                
-                # Hitung total peserta yang dipindahkan
-                dipindahkan = 0
-                for peserta_id in st.session_state.sistem.penempatan_awal:
-                    if peserta_id in st.session_state.sistem.penempatan_akhir:
-                        if st.session_state.sistem.penempatan_awal[peserta_id] != st.session_state.sistem.penempatan_akhir[peserta_id]:
-                            dipindahkan += 1
-                
-                # Tampilkan metrik
-                col1.metric(
-                    "Total Peserta", 
-                    peserta_akhir, 
-                    f"{peserta_akhir - peserta_awal:+d}" if peserta_akhir != peserta_awal else "0"
-                )
-                
-                col2.metric(
-                    "Match Preferensi", 
-                    f"{match_akhir} ({match_akhir/peserta_akhir:.1%})",
-                    f"{match_akhir - match_awal:+d} ({(match_akhir/peserta_akhir) - (match_awal/peserta_awal):.1%})"
-                )
-                
-                col3.metric(
-                    "Peserta Dipindahkan", 
-                    dipindahkan,
-                    f"{dipindahkan/peserta_awal:.1%} dari total"
-                )
-                
-                # Tampilkan status distribusi wahana
-                st.subheader("📈 Perbandingan Status Wahana")
-                
-                # Buat DataFrame untuk perbandingan status wahana
-                status_sebelum_df = pd.DataFrame()
-                status_sebelum_df['Nama Wahana'] = st.session_state.sistem.wahana_df['Nama Wahana']
-                status_sebelum_df['Kategori'] = st.session_state.sistem.wahana_df['Kategori Pekerjaan']
-                status_sebelum_df['Rasio Normal'] = st.session_state.sistem.wahana_df['Pasien Normal'] / st.session_state.sistem.wahana_df['Kapasitas Optimal']
-                
-                # Definisikan fungsi untuk status sebelum
-                def status_sebelum(rasio):
+                # Tentukan status berdasarkan rasio
+                def tentukan_status(rasio):
                     if rasio == 0:
                         return 'Tutup'
                     elif rasio < 5:
@@ -1091,342 +1122,497 @@ def main():
                     else:
                         return 'Stabil'
                 
-                status_sebelum_df['Status Sebelum Gangguan'] = status_sebelum_df['Rasio Normal'].apply(status_sebelum)
-                status_sebelum_df['Status Setelah Gangguan'] = st.session_state.sistem.wahana_df['Status Gangguan']
+                status_normal_detail['Status'] = status_normal_detail['Rasio Pasien/Kapasitas'].apply(tentukan_status)
                 
-                # Tampilkan perubahan status dalam tabel
-                status_sebelum_df['Perubahan Status'] = status_sebelum_df.apply(
-                    lambda x: '✓ Tetap' if x['Status Sebelum Gangguan'] == x['Status Setelah Gangguan'] 
-                    else '⚠️ Berubah', axis=1
-                )
-                
+                # Tampilkan tabel dengan conditional formatting
                 st.dataframe(
-                    status_sebelum_df.style.apply(
-                        lambda x: ['background-color: #e6ffe6' if x['Perubahan Status'] == '✓ Tetap' else 
-                                'background-color: #ffe6e6' for _ in x],
+                    status_normal_detail.style.apply(
+                        lambda x: ['background-color: #27AE60; color: white' if x['Status'] == 'Stabil' 
+                                else 'background-color: #F39C12; color: black' if x['Status'] == 'Underutilized'
+                                else 'background-color: #C0392B; color: white' if x['Status'] == 'Overload'
+                                else 'background-color: #7F8C8D; color: white' for _ in x],
                         axis=1
                     ),
                     use_container_width=True
                 )
                 
-                # Visualisasikan perubahan status
-                perubahan_count = status_sebelum_df['Perubahan Status'].value_counts()
+                st.info("⚠️ Klik tombol **Simulasikan Gangguan** untuk melihat perubahan status wahana.")
+    
+    with tab4:
+        st.header("Hasil Akhir")
+        
+        if not st.session_state.gangguan_done:
+            st.warning("Silakan lakukan simulasi gangguan terlebih dahulu di tab Simulasi Gangguan")
+        else:
+            # Tombol untuk melakukan penyesuaian (hanya tampilkan jika belum dilakukan penyesuaian)
+            if not st.session_state.penyesuaian_done:
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    redistribution_button = st.button("Lakukan Penyesuaian Penempatan", 
+                                                    use_container_width=True, 
+                                                    type="primary")
                 
-                fig_perubahan = px.pie(
-                    values=perubahan_count.values,
-                    names=perubahan_count.index,
-                    title="Proporsi Wahana Yang Mengalami Perubahan Status",
-                    color=perubahan_count.index,
-                    color_discrete_map={
-                        '✓ Tetap': '#4CAF50',
-                        '⚠️ Berubah': '#F44336'
-                    }
-                )
-                st.plotly_chart(fig_perubahan, use_container_width=True)
-                
-                # Tampilkan detail perubahan penempatan
-                st.subheader("🔄 Detail Perubahan Penempatan")
-                
-                # Buat DataFrame untuk peserta yang dipindahkan
-                perubahan_df = pd.DataFrame(columns=[
-                    'ID Peserta', 'Nama Peserta', 'Preferensi', 
-                    'Wahana Awal', 'Status Awal', 'Match Awal',
-                    'Wahana Akhir', 'Status Akhir', 'Match Akhir',
-                    'Peningkatan Match'
-                ])
-                
-                # Isi data perubahan penempatan
-                for peserta_id in st.session_state.sistem.penempatan_awal:
-                    if peserta_id not in st.session_state.sistem.penempatan_akhir:
-                        continue
+                if redistribution_button:
+                    with st.spinner('Sedang menyesuaikan penempatan berdasarkan kondisi gangguan...'):
+                        try:
+                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif()
+                            st.session_state.penyesuaian_done = True
+                            st.success("✅ Penyesuaian penempatan berhasil dilakukan!")
+                        except Exception as e:
+                            st.error(f"❌ Gagal melakukan penyesuaian: {str(e)}")
+                            import traceback
+                            st.code(traceback.format_exc())
+                            st.stop()
+            
+            # Tampilkan hasil jika sudah dilakukan penyesuaian
+            if st.session_state.penyesuaian_done:
+                try:
+                    # Tampilkan statistik penjadwalan dengan card styling
+                    st.subheader("📊 Statistik Penjadwalan")
                     
-                    wahana_awal = st.session_state.sistem.penempatan_awal[peserta_id]
-                    wahana_akhir = st.session_state.sistem.penempatan_akhir[peserta_id]
-                    
-                    if wahana_awal != wahana_akhir:
-                        # Ada perubahan penempatan, tambahkan ke DataFrame
-                        peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
-                        wahana_awal_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana_awal].iloc[0]
-                        wahana_akhir_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana_akhir].iloc[0]
-                        
-                        # Tentukan match sebelum dan sesudah
-                        match_awal = peserta['Preferensi Pekerjaan'] == wahana_awal_data['Kategori Pekerjaan']
-                        match_akhir = peserta['Preferensi Pekerjaan'] == wahana_akhir_data['Kategori Pekerjaan']
-                        
-                        # Tambahkan ke DataFrame
-                        perubahan_df = perubahan_df._append({
-                            'ID Peserta': peserta_id,
-                            'Nama Peserta': peserta['Nama Peserta'],
-                            'Preferensi': peserta['Preferensi Pekerjaan'],
-                            'Wahana Awal': wahana_awal,
-                            'Status Awal': wahana_awal_data['Status Gangguan'],
-                            'Match Awal': '✅' if match_awal else '❌',
-                            'Wahana Akhir': wahana_akhir,
-                            'Status Akhir': wahana_akhir_data['Status Gangguan'],
-                            'Match Akhir': '✅' if match_akhir else '❌',
-                            'Peningkatan Match': '✅' if match_akhir and not match_awal else 
-                                            '❌' if not match_akhir and match_awal else
-                                            '➖'
-                        }, ignore_index=True)
-                
-                # Tampilkan tabel perubahan
-                if not perubahan_df.empty:
-                    # Tambahkan pengurutan & pewarnaan
-                    perubahan_df = perubahan_df.sort_values(by=['Peningkatan Match', 'Match Akhir'], ascending=[False, False])
-                    
-                    st.dataframe(
-                        perubahan_df.style.apply(
-                            lambda x: ['background-color: #e6ffe6' if x['Match Akhir'] == '✅' else 
-                                    'background-color: #ffe6e6' for _ in x],
-                            axis=1
-                        ),
-                        use_container_width=True
-                    )
-                    
-                    # Tampilkan metrik perubahan penempatan
+                    # Buat baris metrik untuk perbandingan
                     col1, col2, col3 = st.columns(3)
                     
-                    peningkatan_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '✅')
-                    penurunan_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '❌')
-                    tetap_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '➖')
+                    # Hitung statistik awal dan akhir
+                    peserta_awal = len(st.session_state.sistem.penempatan_awal)
+                    peserta_akhir = len(st.session_state.sistem.penempatan_akhir)
                     
-                    col1.metric("Peningkatan Match", peningkatan_match)
-                    col2.metric("Penurunan Match", penurunan_match)
-                    col3.metric("Tetap", tetap_match)
-                    
-                    # Buat grafik aliran dari wahana asal ke wahana tujuan
-                    st.subheader("🔄 Aliran Pemindahan Peserta")
-                    
-                    # Agregasi untuk aliran Sankey
-                    aliran_df = perubahan_df.groupby(['Wahana Awal', 'Wahana Akhir']).size().reset_index(name='Jumlah')
-                    
-                    wahana_list = sorted(list(set(aliran_df['Wahana Awal'].tolist() + aliran_df['Wahana Akhir'].tolist())))
-                    wahana_indices = {wahana: i for i, wahana in enumerate(wahana_list)}
-                    
-                    # Buat diagram Sankey
-                    if len(aliran_df) > 0:
-                        fig = px.sunburst(
-                            perubahan_df,
-                            path=['Wahana Awal', 'Wahana Akhir'],
-                            title='Aliran Pemindahan Peserta'
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Tidak ada perubahan penempatan peserta yang terdeteksi.")
-                
-                # Perbandingan distribusi peserta per wahana
-                st.subheader("📊 Perbandingan Distribusi Peserta per Wahana")
-                
-                # Hitung distribusi peserta per wahana sebelum
-                distribusi_awal = pd.DataFrame(
-                    pd.Series(st.session_state.sistem.penempatan_awal).value_counts()
-                ).reset_index()
-                distribusi_awal.columns = ['Nama Wahana', 'Jumlah Peserta Awal']
-                
-                # Hitung distribusi peserta per wahana sesudah
-                distribusi_akhir = pd.DataFrame(
-                    pd.Series(st.session_state.sistem.penempatan_akhir).value_counts()
-                ).reset_index()
-                distribusi_akhir.columns = ['Nama Wahana', 'Jumlah Peserta Akhir']
-                
-                # Gabungkan keduanya
-                distribusi_gabungan = pd.merge(
-                    distribusi_awal, distribusi_akhir, 
-                    on='Nama Wahana', how='outer'
-                ).fillna(0)
-                
-                # Tambahkan kolom perubahan
-                distribusi_gabungan['Perubahan'] = distribusi_gabungan['Jumlah Peserta Akhir'] - distribusi_gabungan['Jumlah Peserta Awal']
-                
-                # Tampilkan dalam tabel dengan pewarnaan untuk perubahan
-                st.dataframe(
-                    distribusi_gabungan.style.background_gradient(
-                        subset=['Perubahan'], cmap='RdYlGn'
-                    ),
-                    use_container_width=True
-                )
-                
-                # Buat grafik batang perbandingan
-                fig_distribusi = px.bar(
-                    distribusi_gabungan,
-                    x='Nama Wahana',
-                    y=['Jumlah Peserta Awal', 'Jumlah Peserta Akhir'],
-                    barmode='group',
-                    title='Perbandingan Distribusi Peserta per Wahana',
-                    color_discrete_sequence=['#1f77b4', '#ff7f0e']
-                )
-                st.plotly_chart(fig_distribusi, use_container_width=True)
-                
-                # Tampilkan tabel hasil akhir
-                st.subheader("📋 Hasil Penjadwalan Akhir")
-                
-                # Buat dataframe untuk jadwal penempatan
-                if st.session_state.sistem.penempatan_akhir:
-                    # Buat dictionary untuk mengelompokkan peserta per wahana
-                    peserta_per_wahana = defaultdict(list)
-                    
-                    # Susun data peserta berdasarkan wahana penempatan
-                    for peserta_id, wahana in st.session_state.sistem.penempatan_akhir.items():
-                        # Ambil data peserta
+                    # Hitung match preferensi awal
+                    match_awal = 0
+                    for peserta_id, wahana in st.session_state.sistem.penempatan_awal.items():
                         peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                        wahana_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana].iloc[0]
+                        if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                            match_awal += 1
+                    
+                    # Hitung match preferensi akhir
+                    match_akhir = 0
+                    for peserta_id, wahana in st.session_state.sistem.penempatan_akhir.items():
+                        peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                        wahana_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana].iloc[0]
+                        if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                            match_akhir += 1
+                    
+                    # Hitung total peserta yang dipindahkan
+                    dipindahkan = 0
+                    for peserta_id in st.session_state.sistem.penempatan_awal:
+                        if peserta_id in st.session_state.sistem.penempatan_akhir:
+                            if st.session_state.sistem.penempatan_awal[peserta_id] != st.session_state.sistem.penempatan_akhir[peserta_id]:
+                                dipindahkan += 1
+                    
+                    # Tampilkan metrik dengan persentase
+                    col1.metric(
+                        "Total Peserta", 
+                        peserta_akhir, 
+                        f"{peserta_akhir - peserta_awal:+d}" if peserta_akhir != peserta_awal else "Tidak berubah"
+                    )
+                    
+                    match_pct_awal = (match_awal/peserta_awal*100) if peserta_awal > 0 else 0
+                    match_pct_akhir = (match_akhir/peserta_akhir*100) if peserta_akhir > 0 else 0
+                    
+                    col2.metric(
+                        "Match Preferensi", 
+                        f"{match_akhir} ({match_pct_akhir:.1f}%)",
+                        f"{match_akhir - match_awal:+d} ({match_pct_akhir - match_pct_awal:.1f}%)"
+                    )
+                    
+                    col3.metric(
+                        "Peserta Dipindahkan", 
+                        dipindahkan,
+                        f"{dipindahkan/peserta_awal*100:.1f}% dari total peserta" if peserta_awal > 0 else "0%"
+                    )
+                    
+                    # Tampilkan tabs untuk hasil yang berbeda
+                    result_tabs = st.tabs([
+                        "Ringkasan Perubahan", 
+                        "Detail Perubahan Penempatan",
+                        "Hasil Penjadwalan Akhir"
+                    ])
+                    
+                    # Tab 1: Ringkasan perubahan
+                    with result_tabs[0]:
+                        col1, col2 = st.columns(2)
                         
-                        # Tambahkan ke grup wahana yang sesuai
-                        peserta_per_wahana[wahana].append({
-                            'ID Peserta': peserta_id,
-                            'Nama Peserta': peserta['Nama Peserta'],
-                            'Preferensi': peserta['Preferensi Pekerjaan']
-                        })
-                    
-                    # Ambil data semua wahana
-                    wahana_data = st.session_state.sistem.wahana_df.set_index('Nama Wahana').to_dict('index')
-                    
-                    # Tampilkan tabulasi jadwal untuk setiap wahana
-                    st.write("Pilih wahana untuk melihat daftar peserta:")
-                    
-                    # Urutkan nama wahana 
-                    nama_wahana_list = sorted(peserta_per_wahana.keys())
-                    
-                    # Buat tabs untuk setiap wahana
-                    wahana_tabs = st.tabs(nama_wahana_list)
-                    
-                    for i, nama_wahana in enumerate(nama_wahana_list):
-                        with wahana_tabs[i]:
-                            # Tampilkan informasi wahana
-                            wahana_info = wahana_data.get(nama_wahana, {})
+                        with col1:
+                            # Tampilkan perbandingan status wahana
+                            st.subheader("Perbandingan Status Wahana")
                             
+                            # Buat DataFrame untuk perbandingan status wahana
+                            status_sebelum_df = pd.DataFrame()
+                            status_sebelum_df['Nama Wahana'] = st.session_state.sistem.wahana_df['Nama Wahana']
+                            status_sebelum_df['Kategori'] = st.session_state.sistem.wahana_df['Kategori Pekerjaan']
+                            
+                            # Definisikan fungsi untuk status
+                            def status_dari_rasio(rasio):
+                                if rasio == 0:
+                                    return 'Tutup'
+                                elif rasio < 5:
+                                    return 'Underutilized'
+                                elif rasio > 20:
+                                    return 'Overload'
+                                else:
+                                    return 'Stabil'
+                            
+                            # Hitung status berdasarkan rasio
+                            status_sebelum_df['Rasio Normal'] = status_sebelum_df.apply(
+                                lambda x: st.session_state.sistem.wahana_df[
+                                    st.session_state.sistem.wahana_df['Nama Wahana'] == x['Nama Wahana']
+                                ]['Pasien Normal'].values[0] / st.session_state.sistem.wahana_df[
+                                    st.session_state.sistem.wahana_df['Nama Wahana'] == x['Nama Wahana']
+                                ]['Kapasitas Optimal'].values[0],
+                                axis=1
+                            )
+                            status_sebelum_df['Status Sebelum Gangguan'] = status_sebelum_df['Rasio Normal'].apply(status_dari_rasio)
+                            status_sebelum_df['Status Setelah Gangguan'] = st.session_state.sistem.wahana_df['Status Gangguan'].values
+                            
+                            # Tampilkan perubahan status dalam tabel
+                            status_sebelum_df['Perubahan Status'] = status_sebelum_df.apply(
+                                lambda x: '✓ Tetap' if x['Status Sebelum Gangguan'] == x['Status Setelah Gangguan'] 
+                                else '⚠️ Berubah', axis=1
+                            )
+                            
+                            # Visualisasikan perubahan status
+                            perubahan_count = status_sebelum_df['Perubahan Status'].value_counts()
+                            
+                            fig_perubahan = px.pie(
+                                values=perubahan_count.values,
+                                names=perubahan_count.index,
+                                title="Proporsi Wahana Yang Mengalami Perubahan Status",
+                                color=perubahan_count.index,
+                                color_discrete_map={
+                                    '✓ Tetap': '#4CAF50',
+                                    '⚠️ Berubah': '#F44336'
+                                },
+                                hole=0.4
+                            )
+                            fig_perubahan.update_layout(margin=dict(t=50, b=30))
+                            st.plotly_chart(fig_perubahan, use_container_width=True)
+                        
+                        with col2:
+                            # Perbandingan distribusi peserta per wahana
+                            st.subheader("Distribusi Peserta per Wahana")
+                            
+                            # Hitung distribusi peserta per wahana sebelum
+                            distribusi_awal = pd.DataFrame(
+                                pd.Series(st.session_state.sistem.penempatan_awal).value_counts()
+                            ).reset_index()
+                            distribusi_awal.columns = ['Nama Wahana', 'Jumlah Peserta Awal']
+                            
+                            # Hitung distribusi peserta per wahana sesudah
+                            distribusi_akhir = pd.DataFrame(
+                                pd.Series(st.session_state.sistem.penempatan_akhir).value_counts()
+                            ).reset_index()
+                            distribusi_akhir.columns = ['Nama Wahana', 'Jumlah Peserta Akhir']
+                            
+                            # Gabungkan keduanya
+                            distribusi_gabungan = pd.merge(
+                                distribusi_awal, distribusi_akhir, 
+                                on='Nama Wahana', how='outer'
+                            ).fillna(0)
+                            
+                            # Tambahkan kolom perubahan
+                            distribusi_gabungan['Perubahan'] = distribusi_gabungan['Jumlah Peserta Akhir'] - distribusi_gabungan['Jumlah Peserta Awal']
+                            
+                            # Buat grafik batang perbandingan
+                            fig_distribusi = px.bar(
+                                distribusi_gabungan,
+                                x='Nama Wahana',
+                                y=['Jumlah Peserta Awal', 'Jumlah Peserta Akhir'],
+                                barmode='group',
+                                title='Perbandingan Distribusi Peserta',
+                                color_discrete_sequence=['#1f77b4', '#ff7f0e'],
+                                labels={
+                                    'value': 'Jumlah Peserta',
+                                    'variable': 'Kondisi'
+                                }
+                            )
+                            fig_distribusi.update_layout(margin=dict(t=50, b=30))
+                            st.plotly_chart(fig_distribusi, use_container_width=True)
+                        
+                        # Tampilkan tabel perbandingan
+                        st.subheader("Detail Perubahan Distribusi")
+                        st.dataframe(
+                            distribusi_gabungan.style.background_gradient(
+                                subset=['Perubahan'], cmap='RdYlGn'
+                            ),
+                            use_container_width=True
+                        )
+                    
+                    # Tab 2: Detail perubahan penempatan
+                    with result_tabs[1]:
+                        st.subheader("🔄 Detail Pemindahan Peserta")
+                        
+                        # Buat DataFrame untuk peserta yang dipindahkan
+                        perubahan_df = pd.DataFrame(columns=[
+                            'ID Peserta', 'Nama Peserta', 'Preferensi', 
+                            'Wahana Awal', 'Status Awal', 'Match Awal',
+                            'Wahana Akhir', 'Status Akhir', 'Match Akhir',
+                            'Peningkatan Match'
+                        ])
+                        
+                        # Isi data perubahan penempatan
+                        for peserta_id in st.session_state.sistem.penempatan_awal:
+                            if peserta_id not in st.session_state.sistem.penempatan_akhir:
+                                continue
+                            
+                            wahana_awal = st.session_state.sistem.penempatan_awal[peserta_id]
+                            wahana_akhir = st.session_state.sistem.penempatan_akhir[peserta_id]
+                            
+                            if wahana_awal != wahana_akhir:
+                                # Ada perubahan penempatan, tambahkan ke DataFrame
+                                peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                                wahana_awal_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana_awal].iloc[0]
+                                wahana_akhir_data = st.session_state.sistem.wahana_df[st.session_state.sistem.wahana_df['Nama Wahana'] == wahana_akhir].iloc[0]
+                                
+                                # Tentukan match sebelum dan sesudah
+                                match_awal = peserta['Preferensi Pekerjaan'] == wahana_awal_data['Kategori Pekerjaan']
+                                match_akhir = peserta['Preferensi Pekerjaan'] == wahana_akhir_data['Kategori Pekerjaan']
+                                
+                                # Tambahkan ke DataFrame
+                                perubahan_df = perubahan_df._append({
+                                    'ID Peserta': peserta_id,
+                                    'Nama Peserta': peserta['Nama Peserta'],
+                                    'Preferensi': peserta['Preferensi Pekerjaan'],
+                                    'Wahana Awal': wahana_awal,
+                                    'Status Awal': wahana_awal_data['Status Gangguan'],
+                                    'Match Awal': '✅' if match_awal else '❌',
+                                    'Wahana Akhir': wahana_akhir,
+                                    'Status Akhir': wahana_akhir_data['Status Gangguan'],
+                                    'Match Akhir': '✅' if match_akhir else '❌',
+                                    'Peningkatan Match': '✅' if match_akhir and not match_awal else 
+                                                    '❌' if not match_akhir and match_awal else
+                                                    '➖'
+                                }, ignore_index=True)
+                        
+                        # Tampilkan tabel perubahan
+                        if not perubahan_df.empty:
+                            # Tambahkan pengurutan & pewarnaan
+                            perubahan_df = perubahan_df.sort_values(by=['Peningkatan Match', 'Match Akhir'], ascending=[False, False])
+                            
+                            # Tampilkan metrik perubahan penempatan
                             col1, col2, col3 = st.columns(3)
-                            col1.metric("Kategori", wahana_info.get('Kategori Pekerjaan', 'N/A'))
-                            col2.metric("Status", wahana_info.get('Status Gangguan', 'N/A'))
-                            col3.metric("Kapasitas", wahana_info.get('Kapasitas Optimal', 0))
                             
-                            # Tampilkan daftar peserta
-                            st.subheader(f"Daftar Peserta di {nama_wahana}")
+                            peningkatan_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '✅')
+                            penurunan_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '❌')
+                            tetap_match = sum(1 for _, row in perubahan_df.iterrows() if row['Peningkatan Match'] == '➖')
                             
-                            # Buat DataFrame dari daftar peserta
-                            peserta_df = pd.DataFrame(peserta_per_wahana[nama_wahana])
+                            col1.metric("Peningkatan Match", peningkatan_match)
+                            col2.metric("Penurunan Match", penurunan_match)
+                            col3.metric("Tetap", tetap_match)
                             
-                            # Tambahkan kolom match
-                            peserta_df['Match'] = peserta_df['Preferensi'] == wahana_info.get('Kategori Pekerjaan', '')
-                            peserta_df['Match'] = peserta_df['Match'].map({True: '✅ Match', False: '❌ Tidak Match'})
-                            
-                            # Tampilkan tabel dengan pewarnaan
+                            # Tampilkan tabel dengan styling yang lebih baik
                             st.dataframe(
-                                peserta_df.style.apply(
-                                    lambda x: ['background-color: #e6ffe6' if x['Match'] == '✅ Match' else 
-                                            'background-color: #ffe6e6' for _ in x],
+                                perubahan_df.style.apply(
+                                    lambda x: ['background-color: #2ECC71; color: black' if x['Match Akhir'] == '✅' else 
+                                            'background-color: #E74C3C; color: white' for _ in x],
                                     axis=1
                                 ),
                                 use_container_width=True
                             )
                             
-                            # Tampilkan statistik match
-                            total_peserta = len(peserta_df)
-                            match_count = (peserta_df['Match'] == '✅ Match').sum()
-                            match_percent = (match_count / total_peserta * 100) if total_peserta > 0 else 0
+                            # Buat grafik aliran dari wahana asal ke wahana tujuan
+                            st.subheader("🔄 Aliran Pemindahan Peserta")
                             
-                            st.metric("Persentase Kesesuaian", f"{match_percent:.1f}%", f"{match_count}/{total_peserta} peserta")
+                            # Buat diagram Sunburst yang lebih informatif
+                            fig = px.sunburst(
+                                perubahan_df,
+                                path=['Status Awal', 'Wahana Awal', 'Wahana Akhir'],
+                                color='Match Akhir',
+                                color_discrete_map={
+                                    '✅': '#2ECC71',
+                                    '❌': '#E74C3C'
+                                },
+                                title='Aliran Pemindahan Peserta (Status Awal → Wahana Awal → Wahana Akhir)'
+                            )
+                            fig.update_layout(margin=dict(t=50, b=30))
+                            st.plotly_chart(fig, use_container_width=True)
                             
-                            # Tambahkan download button untuk setiap wahana
-                            csv = peserta_df.to_csv(index=False)
+                            # Tambahkan download button
                             st.download_button(
-                                label=f"📥 Download Daftar Peserta {nama_wahana}",
-                                data=csv,
-                                file_name=f"peserta_{nama_wahana.replace(' ', '_')}.csv",
+                                label="📥 Download Detail Perubahan Penempatan",
+                                data=perubahan_df.to_csv(index=False),
+                                file_name="detail_perubahan_penempatan.csv",
                                 mime="text/csv",
                             )
-                
-                # Tambahkan download jadwal lengkap
-                st.subheader("📊 Jadwal Lengkap Semua Penempatan")
-
-                if st.session_state.sistem.penempatan_akhir:
-                    # Buat DataFrame untuk hasil penempatan lengkap
-                    hasil_lengkap = pd.DataFrame({
-                        'ID Peserta': list(st.session_state.sistem.penempatan_akhir.keys()),
-                        'Nama Wahana': list(st.session_state.sistem.penempatan_akhir.values())
-                    })
+                        else:
+                            st.info("Tidak ada perubahan penempatan peserta yang terdeteksi.")
                     
-                    # Gabungkan dengan data peserta
-                    hasil_lengkap = hasil_lengkap.merge(
-                        st.session_state.sistem.peserta_df,
-                        on='ID Peserta'
-                    )
-                    
-                    # Gabungkan dengan data wahana
-                    hasil_lengkap = hasil_lengkap.merge(
-                        st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Status Gangguan']],
-                        on='Nama Wahana',
-                        how='left'
-                    )
-                    
-                    # Tambahkan kolom match
-                    hasil_lengkap['Match'] = hasil_lengkap['Preferensi Pekerjaan'] == hasil_lengkap['Kategori Pekerjaan']
-                    hasil_lengkap['Match'] = hasil_lengkap['Match'].map({True: '✅ Match', False: '❌ Tidak Match'})
-                    
-                    # Urutkan berdasarkan wahana dan nama peserta
-                    hasil_lengkap = hasil_lengkap.sort_values(['Nama Wahana', 'Nama Peserta'])
-                    
-                    # Tampilkan tabel dengan informasi lengkap
-                    st.dataframe(
-                        hasil_lengkap.style.apply(
-                            lambda x: ['background-color: #e6ffe6' if x['Match'] == '✅ Match' else 
-                                    'background-color: #ffe6e6' for _ in x],
-                            axis=1
-                        ),
-                        use_container_width=True
-                    )
-                    
-                    # Download jadwal lengkap
-                    csv_lengkap = hasil_lengkap.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Jadwal Lengkap",
-                        data=csv_lengkap,
-                        file_name="jadwal_lengkap_penempatan.csv",
-                        mime="text/csv",
-                    )
-                    
-                    # Jika ada data perubahan, tambahkan tombol download
-                    if not perubahan_df.empty:
-                        st.download_button(
-                            label="📥 Download Detail Perubahan Penempatan",
-                            data=perubahan_df.to_csv(index=False),
-                            file_name="detail_perubahan_penempatan.csv",
-                            mime="text/csv",
-                        )
-                
-                # Tampilkan kualitas penjadwalan akhir
-                st.subheader("⭐ Kualitas Penjadwalan Akhir")
-                
-                if hasattr(st.session_state.sistem, 'kualitas_penjadwalan'):
-                    kualitas = st.session_state.sistem.kualitas_penjadwalan
-                    
-                    col1, col2 = st.columns(2)
-                    col1.metric("Rata-rata Skor Kecocokan", f"{kualitas['rata_rata_skor']:.1f}/100")
-                    col2.info(f"**Interpretasi**: {kualitas['interpretasi']}")
-                    
-                    # Visualisasi skor per wahana
-                    st.write("### Rata-rata Skor Kecocokan per Wahana")
-                    if kualitas['per_wahana']:
-                        skor_wahana_df = pd.DataFrame({
-                            'Wahana': list(kualitas['per_wahana'].keys()),
-                            'Rata-rata Skor': list(kualitas['per_wahana'].values())
-                        }).sort_values('Rata-rata Skor', ascending=False)
+                    # Tab 3: Hasil penjadwalan akhir
+                    with result_tabs[2]:
+                        st.subheader("📋 Jadwal Penempatan Akhir")
                         
-                        fig = px.bar(skor_wahana_df, 
-                                    x='Wahana', 
-                                    y='Rata-rata Skor',
-                                    title='Rata-rata Skor Kecocokan per Wahana',
-                                    color='Rata-rata Skor',
-                                    color_continuous_scale='RdYlGn')
-                        st.plotly_chart(fig)
-                    else:
-                        st.info("Data kualitas per wahana tidak tersedia")
-                else:
-                    st.info("Data kualitas penjadwalan tidak tersedia")
+                        # Buat dataframe untuk jadwal penempatan
+                        if st.session_state.sistem.penempatan_akhir:
+                            # Buat dictionary untuk mengelompokkan peserta per wahana
+                            peserta_per_wahana = defaultdict(list)
+                            
+                            # Susun data peserta berdasarkan wahana penempatan
+                            for peserta_id, wahana in st.session_state.sistem.penempatan_akhir.items():
+                                # Ambil data peserta
+                                peserta = st.session_state.sistem.peserta_df[st.session_state.sistem.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                                
+                                # Tambahkan ke grup wahana yang sesuai
+                                peserta_per_wahana[wahana].append({
+                                    'ID Peserta': peserta_id,
+                                    'Nama Peserta': peserta['Nama Peserta'],
+                                    'Preferensi': peserta['Preferensi Pekerjaan']
+                                })
+                            
+                            # Ambil data semua wahana
+                            wahana_data = st.session_state.sistem.wahana_df.set_index('Nama Wahana').to_dict('index')
+                            
+                            # Buat DataFrame untuk hasil lengkap
+                            hasil_lengkap = pd.DataFrame({
+                                'ID Peserta': list(st.session_state.sistem.penempatan_akhir.keys()),
+                                'Nama Wahana': list(st.session_state.sistem.penempatan_akhir.values())
+                            })
+                            
+                            # Gabungkan dengan data peserta
+                            hasil_lengkap = hasil_lengkap.merge(
+                                st.session_state.sistem.peserta_df,
+                                on='ID Peserta'
+                            )
+                            
+                            # Gabungkan dengan data wahana
+                            hasil_lengkap = hasil_lengkap.merge(
+                                st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Status Gangguan']],
+                                on='Nama Wahana',
+                                how='left'
+                            )
+                            
+                            # Tambahkan kolom match
+                            hasil_lengkap['Match'] = hasil_lengkap['Preferensi Pekerjaan'] == hasil_lengkap['Kategori Pekerjaan']
+                            hasil_lengkap['Match'] = hasil_lengkap['Match'].map({True: '✅ Match', False: '❌ Tidak Match'})
+                            
+                            # Urutkan berdasarkan wahana dan nama peserta
+                            hasil_lengkap = hasil_lengkap.sort_values(['Nama Wahana', 'Nama Peserta'])
+                            
+                            # Tampilkan tabel dengan informasi lengkap
+                            st.dataframe(
+                                hasil_lengkap.style.apply(
+                                    lambda x: ['background-color: #2ECC71; color: black' if x['Match'] == '✅ Match' else 
+                                            'background-color: #E74C3C; color: white' for _ in x],
+                                    axis=1
+                                ),
+                                use_container_width=True
+                            )
+                            
+                            # Tampilkan tabulasi jadwal untuk setiap wahana
+                            st.subheader("Detail Peserta per Wahana")
+                            st.write("Pilih wahana untuk melihat daftar peserta:")
+                            
+                            # Urutkan nama wahana 
+                            nama_wahana_list = sorted(peserta_per_wahana.keys())
+                            
+                            # Buat tabs untuk setiap wahana
+                            wahana_tabs = st.tabs(nama_wahana_list)
+                            
+                            for i, nama_wahana in enumerate(nama_wahana_list):
+                                with wahana_tabs[i]:
+                                    # Tampilkan informasi wahana
+                                    wahana_info = wahana_data.get(nama_wahana, {})
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Kategori", wahana_info.get('Kategori Pekerjaan', 'N/A'))
+                                    col2.metric("Status", wahana_info.get('Status Gangguan', 'N/A'))
+                                    col3.metric("Kapasitas", wahana_info.get('Kapasitas Optimal', 0))
+                                    
+                                    # Tampilkan daftar peserta
+                                    st.write(f"**Daftar Peserta di {nama_wahana}**")
+                                    
+                                    # Buat DataFrame dari daftar peserta
+                                    peserta_df = pd.DataFrame(peserta_per_wahana[nama_wahana])
+                                    
+                                    # Tambahkan kolom match
+                                    peserta_df['Match'] = peserta_df['Preferensi'] == wahana_info.get('Kategori Pekerjaan', '')
+                                    peserta_df['Match'] = peserta_df['Match'].map({True: '✅ Match', False: '❌ Tidak Match'})
+                                    
+                                    # Tampilkan tabel dengan pewarnaan yang lebih baik
+                                    st.dataframe(
+                                        peserta_df.style.apply(
+                                            lambda x: ['background-color: #2ECC71; color: black' if x['Match'] == '✅ Match' else 
+                                                    'background-color: #E74C3C; color: white' for _ in x],
+                                            axis=1
+                                        ),
+                                        use_container_width=True
+                                    )
+                                    
+                                    # Tampilkan statistik match
+                                    total_peserta = len(peserta_df)
+                                    match_count = (peserta_df['Match'] == '✅ Match').sum()
+                                    match_percent = (match_count / total_peserta * 100) if total_peserta > 0 else 0
+                                    
+                                    st.metric("Persentase Kesesuaian", f"{match_percent:.1f}%", f"{match_count}/{total_peserta} peserta")
+                            
+                            # Download jadwal lengkap
+                            st.download_button(
+                                label="📥 Download Jadwal Lengkap",
+                                data=hasil_lengkap.to_csv(index=False),
+                                file_name="jadwal_lengkap_penempatan.csv",
+                                mime="text/csv",
+                            )
                     
-            except Exception as e:
-                st.error(f"Gagal menampilkan hasil akhir: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                    # Tampilkan kualitas penjadwalan akhir
+                    st.subheader("⭐ Kualitas Penjadwalan Akhir")
+                    
+                    if hasattr(st.session_state.sistem, 'kualitas_penjadwalan'):
+                        kualitas = st.session_state.sistem.kualitas_penjadwalan
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("Rata-rata Skor Kecocokan", f"{kualitas['rata_rata_skor']:.1f}/100")
+                            st.info(f"**Interpretasi**: {kualitas['interpretasi']}")
+                        
+                        with col2:
+                            # Visualisasi skor per wahana
+                            if kualitas['per_wahana']:
+                                skor_wahana_df = pd.DataFrame({
+                                    'Wahana': list(kualitas['per_wahana'].keys()),
+                                    'Rata-rata Skor': list(kualitas['per_wahana'].values())
+                                }).sort_values('Rata-rata Skor', ascending=False)
+                                
+                                fig = px.bar(skor_wahana_df, 
+                                            x='Wahana', 
+                                            y='Rata-rata Skor',
+                                            title='Rata-rata Skor Kecocokan per Wahana',
+                                            color='Rata-rata Skor',
+                                            color_continuous_scale='RdYlGn')
+                                fig.update_layout(margin=dict(t=50, b=30))
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.info("Data kualitas per wahana tidak tersedia")
+                    else:
+                        st.info("Data kualitas penjadwalan tidak tersedia")
+                        
+                except Exception as e:
+                    st.error(f"Gagal menampilkan hasil akhir: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            else:
+                # Jika sudah ada simulasi tapi belum penyesuaian, tampilkan visualisasi status wahana
+                st.info("⚠️ Silakan klik tombol 'Lakukan Penyesuaian Penempatan' di atas untuk melakukan redistribusi peserta berdasarkan kondisi gangguan.")
+                
+                # Tampilkan rangkuman status wahana
+                st.subheader("📊 Ringkasan Status Wahana Setelah Gangguan")
+                
+                # Hitung jumlah wahana per status
+                status_counts = st.session_state.sistem.wahana_df['Status Gangguan'].value_counts()
+                
+                # Tampilkan metrik
+                cols = st.columns(4)
+                metrics = {
+                    'Stabil': {'color': '#27AE60', 'icon': '✅'},
+                    'Underutilized': {'color': '#F39C12', 'icon': '⚠️'},
+                    'Overload': {'color': '#C0392B', 'icon': '🚨'},
+                    'Tutup': {'color': '#7F8C8D', 'icon': '❌'}
+                }
+                
+                for i, (status, count) in enumerate(status_counts.items()):
+                    if i < len(cols):
+                        color = metrics.get(status, {}).get('color', '#7F8C8D')
+                        icon = metrics.get(status, {}).get('icon', '')
+                        cols[i].markdown(f"<div style='background-color: {color}; color: white; padding: 10px; border-radius: 5px; text-align: center;'><h3>{icon} {status}</h3><h2>{count}</h2></div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
