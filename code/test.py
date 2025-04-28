@@ -5,6 +5,7 @@ import tempfile
 import os
 import plotly.express as px
 import math
+import plotly.graph_objects as go
 
 class PenjadwalanAdaptif:
     def __init__(self):
@@ -298,6 +299,24 @@ class PenjadwalanAdaptif:
                         kapasitas_tersedia[wahana] += 1
         
         self.penempatan_akhir = penempatan_baru
+        
+        # Simpan penempatan awal untuk perbandingan
+        penempatan_awal_temp = self.penempatan_awal
+        
+        # Sementara set penempatan_awal ke hasil redistribusi untuk perhitungan metrik
+        self.penempatan_awal = penempatan_baru
+        
+        # Hitung metrik kualitas untuk hasil redistribusi
+        self.hitung_rata_rata_skor()
+        self.hitung_deviasi_kecocokan()
+        
+        # Simpan hasil metrik ke variabel terpisah untuk hasil akhir
+        self.kualitas_penjadwalan_akhir = self.kualitas_penjadwalan.copy() if hasattr(self, 'kualitas_penjadwalan') else None
+        self.deviasi_kecocokan_akhir = self.deviasi_kecocokan.copy() if hasattr(self, 'deviasi_kecocokan') else None
+        
+        # Kembalikan penempatan_awal ke nilai asli
+        self.penempatan_awal = penempatan_awal_temp
+        
         return penempatan_baru
     
     def visualisasi_hasil(self):
@@ -640,6 +659,7 @@ class PenjadwalanAdaptif:
                 skor_wahana[wahana_nama].append(skor)
         
         # Fase 2: Distribusi berdasarkan pemerataan skor
+        deviasi_log = []
         # Lakukan iterasi sampai semua peserta ditempatkan atau kapasitas habis
         iterasi_max = len(self.peserta_df) * 2  # Batasi jumlah iterasi untuk menghindari infinite loop
         iterasi = 0
@@ -656,6 +676,18 @@ class PenjadwalanAdaptif:
                     avg_skor_wahana[wahana] = sum(skor_list) / len(skor_list)
                 else:  # Jika belum ada peserta
                     avg_skor_wahana[wahana] = 0
+            
+            # Hitung dan log deviasi setiap 10 iterasi
+            if iterasi % 10 == 0 or iterasi == 1:
+                # Hitung deviasi saat ini
+                current_deviasi = 0
+                if avg_skor_wahana:
+                    values = [v for v in avg_skor_wahana.values() if v > 0]
+                    if values:
+                        mean = sum(values) / len(values)
+                        current_deviasi = (sum((x - mean) ** 2 for x in values) / len(values)) ** 0.5 if len(values) > 1 else 0
+                
+                deviasi_log.append((iterasi, current_deviasi))
             
             # Hitung global mean dan standard deviation dari skor rata-rata wahana
             if avg_skor_wahana:
@@ -780,20 +812,23 @@ class PenjadwalanAdaptif:
         # Hitung metrik kualitas
         self.hitung_rata_rata_skor()
         self.hitung_deviasi_kecocokan()
+        self.deviasi_iterasi_log = deviasi_log
         
         return penempatan
         
     def hitung_deviasi_kecocokan(self):
         """Menghitung deviasi skor kecocokan antar wahana untuk evaluasi keseimbangan"""
         if not self.penempatan_awal:
-            return 0
+            return {"std_dev": 0, "min_skor": 0, "max_skor": 0, "range_skor": 0, "rata_rata_per_wahana": {}}
         
+        # Ubah pendekatan: Hitung ulang skor untuk setiap penempatan
         skor_per_wahana = defaultdict(list)
         
         for peserta_id, wahana_nama in self.penempatan_awal.items():
             peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
             wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_nama].iloc[0]
             
+            # Hitung skor untuk penempatan ini
             skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
             skor_per_wahana[wahana_nama].append(skor)
         
@@ -1012,6 +1047,8 @@ class PenjadwalanAdaptif:
         # Hitung rata-rata skor kecocokan
         self.hitung_rata_rata_skor()
         
+        self.hitung_deviasi_kecocokan()
+        
         return penempatan
 
 
@@ -1026,6 +1063,7 @@ def main():
         st.session_state.penjadwalan_done = False
         st.session_state.gangguan_done = False
         st.session_state.penyesuaian_done = False
+        st.session_state.deviasi_history = {}
     
     # Tab navigasi
     tab1, tab2, tab3, tab4 = st.tabs(["Input Data", "Penjadwalan Awal", "Simulasi Gangguan", "Hasil Akhir"])
@@ -1279,8 +1317,14 @@ def main():
                         st.session_state.last_scheduling_method = penjadwalan_type
                         st.session_state.gangguan_done = False
                         st.session_state.penyesuaian_done = False
-                        st.success(f"Penjadwalan awal berhasil dilakukan dengan algoritma {penjadwalan_type}!")
                         
+                        # Simpan deviasi ke history jika ada
+                        if hasattr(st.session_state.sistem, 'deviasi_kecocokan'):
+                            # Pastikan deviasi tidak null sebelum menyimpan
+                            if st.session_state.sistem.deviasi_kecocokan and 'std_dev' in st.session_state.sistem.deviasi_kecocokan:
+                                st.session_state.deviasi_history[penjadwalan_type] = st.session_state.sistem.deviasi_kecocokan
+                        
+                        st.success(f"Penjadwalan awal berhasil dilakukan dengan algoritma {penjadwalan_type}!")                        
                         # Perhitungan metrik kualitas dipindahkan ke dalam fungsi penjadwalan masing-masing
                         # Pastikan fungsi-fungsi tersebut melakukan:
                         # 1. self.hitung_rata_rata_skor()
@@ -1509,6 +1553,26 @@ def main():
                         
                         fig.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig, use_container_width=True)
+                        
+                    if 'deviasi_history' in st.session_state and len(st.session_state.deviasi_history) > 0:
+                        st.subheader("Perbandingan Deviasi Antar Metode Penjadwalan")
+                        deviasi_df = pd.DataFrame([
+                            {"Metode": metode, "Standar Deviasi": data["std_dev"]} 
+                            for metode, data in st.session_state.deviasi_history.items()
+                        ])
+                        
+                        fig_compare = px.bar(
+                            deviasi_df, 
+                            x="Metode", 
+                            y="Standar Deviasi",
+                            title="Perbandingan Standar Deviasi Antar Metode",
+                            color="Standar Deviasi",
+                            color_continuous_scale="RdYlBu_r",  # Semakin rendah semakin baik (biru)
+                            text="Standar Deviasi"
+                        )
+                        fig_compare.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                        fig_compare.update_layout(xaxis_tickangle=-45)
+                        st.plotly_chart(fig_compare, use_container_width=True)
             
     with tab3:
         st.header("Simulasi Gangguan")
@@ -1823,41 +1887,15 @@ def main():
             # Tombol untuk melakukan penyesuaian (hanya tampilkan jika belum dilakukan penyesuaian)
             if not st.session_state.penyesuaian_done:
                 col1, col2 = st.columns([1, 3])
-                
                 with col1:
-                    redistribusi_type = st.radio(
-                        "Pilih Prioritas Redistribusi:", 
-                        ["Prioritas Stabilitas", "Prioritas Preferensi", "Pemindahan Minimal"],
-                        help="Stabilitas: Prioritaskan keseimbangan rasio pesien:peserta\n"
-                            "Preferensi: Prioritaskan kesesuaian preferensi peserta\n"
-                            "Minimal: Hanya pindahkan peserta dari wahana yang tutup"
-                    )
-                    
-                    # Add a unique key to button
                     redistribution_button = st.button("Lakukan Penyesuaian Penempatan", 
                                                     use_container_width=True, 
-                                                    type="primary",
-                                                    key="redistribution_button_unique")  # Added unique key
-                
-                with col2:
-                    st.info(
-                        "**Prioritas Stabilitas**: Utamakan keseimbangan rasio pasien:peserta di semua wahana.\n\n"
-                        "**Prioritas Preferensi**: Utamakan kesesuaian preferensi peserta meskipun beberapa wahana mungkin tidak stabil.\n\n"
-                        "**Pemindahan Minimal**: Hanya pindahkan peserta dari wahana yang tutup, minimal perubahan."
-                    )
+                                                    type="primary")
                 
                 if redistribution_button:
                     with st.spinner('Sedang menyesuaikan penempatan berdasarkan kondisi gangguan...'):
                         try:
-                            # Konversi pilihan radio button ke parameter fungsi
-                            if redistribusi_type == "Prioritas Stabilitas":
-                                prioritas = "stabilitas"
-                            elif redistribusi_type == "Prioritas Preferensi":
-                                prioritas = "preferensi"
-                            else:  # Pemindahan Minimal
-                                prioritas = "minimal"
-                            
-                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif(prioritas=prioritas)
+                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif()
                             st.session_state.penyesuaian_done = True
                             st.success("✅ Penyesuaian penempatan berhasil dilakukan!")
                         except Exception as e:
