@@ -739,9 +739,50 @@ def main():
                         
                         # Tampilkan hasil
                         st.subheader("Distribusi Peserta per Wahana (Awal)")
-                        distribusi = pd.Series(penempatan_hasil).value_counts().reset_index()
-                        distribusi.columns = ['Nama Wahana', 'Jumlah Peserta']
-                        st.bar_chart(distribusi.set_index('Nama Wahana'))
+                        
+                        # Hitung jumlah peserta per wahana
+                        penempatan_counts = pd.Series(penempatan_hasil).value_counts()
+                        
+                        # Pastikan semua wahana ditampilkan (termasuk yang kosong)
+                        semua_wahana = st.session_state.sistem.wahana_df['Nama Wahana'].tolist()
+                        distribusi = pd.DataFrame({'Nama Wahana': semua_wahana})
+                        distribusi['Jumlah Peserta'] = distribusi['Nama Wahana'].map(penempatan_counts).fillna(0).astype(int)
+                        
+                        # Tambahkan informasi kapasitas
+                        distribusi = distribusi.merge(
+                            st.session_state.sistem.wahana_df[['Nama Wahana', 'Kapasitas Optimal']],
+                            on='Nama Wahana',
+                            how='left'
+                        )
+                        
+                        # Urutkan berdasarkan Jumlah Peserta (descending)
+                        distribusi = distribusi.sort_values(by='Jumlah Peserta', ascending=False)
+                        
+                        # Visualisasi dengan lebih informatif
+                        fig = px.bar(
+                            distribusi,
+                            x='Nama Wahana',
+                            y='Jumlah Peserta',
+                            title='Distribusi Peserta per Wahana',
+                            text='Jumlah Peserta',  # Show values on bars
+                            color='Jumlah Peserta',
+                            color_continuous_scale='Viridis',
+                            labels={'Jumlah Peserta': 'Jumlah Peserta'}
+                        )
+                        
+                        # Tambahkan garis kapasitas maksimum
+                        for i, row in distribusi.iterrows():
+                            fig.add_shape(
+                                type="line",
+                                x0=i-0.4,
+                                y0=row['Kapasitas Optimal'],
+                                x1=i+0.4,
+                                y1=row['Kapasitas Optimal'],
+                                line=dict(color="red", width=2, dash="dash"),
+                            )
+                        
+                        fig.update_layout(xaxis_tickangle=-45)
+                        st.plotly_chart(fig, use_container_width=True)
                         
                         # Simpan hasil di session state
                         st.session_state.distribusi_awal = distribusi
@@ -790,8 +831,8 @@ def main():
                 # Tampilkan tabel dengan informasi lengkap
                 st.dataframe(
                     hasil_awal.style.apply(
-                        lambda x: ['background-color: #008000' if x['Match'] == '✅ Match' else 
-                                'background-color: #FF0000' for _ in x],
+                        lambda x: ['background-color: #2ECC71; color: black' if x['Match'] == '✅ Match' else 
+                                'background-color: #E74C3C; color: white' for _ in x],
                         axis=1
                     ),
                     use_container_width=True
@@ -808,22 +849,109 @@ def main():
                 # Tambahkan statistik per wahana
                 st.subheader("Statistik Penempatan per Wahana")
                 
-                # Grup berdasarkan wahana
+                # Grup berdasarkan wahana untuk yang terisi
                 wahana_stats = hasil_awal.groupby(['Nama Wahana', 'Kategori Pekerjaan']).agg(
                     Total_Peserta=('ID Peserta', 'count'),
                     Match=('Match', lambda x: (x == '✅ Match').sum()),
                     Tidak_Match=('Match', lambda x: (x == '❌ Tidak Match').sum())
                 ).reset_index()
                 
-                # Hitung persentase match
-                wahana_stats['Persentase_Match'] = (wahana_stats['Match'] / wahana_stats['Total_Peserta'] * 100).round(1)
-                wahana_stats['Persentase_Match'] = wahana_stats['Persentase_Match'].map('{:.1f}%'.format)
+                # Pastikan semua wahana ditampilkan (termasuk yang kosong)
+                semua_wahana = st.session_state.sistem.wahana_df[['Nama Wahana', 'Kategori Pekerjaan', 'Kapasitas Optimal']].copy()
+                wahana_stats = semua_wahana.merge(wahana_stats, on=['Nama Wahana', 'Kategori Pekerjaan'], how='left').fillna(0)
                 
-                # Tampilkan tabel statistik
+                # Convert to integers for the count columns
+                wahana_stats['Total_Peserta'] = wahana_stats['Total_Peserta'].astype(int)
+                wahana_stats['Match'] = wahana_stats['Match'].astype(int)
+                wahana_stats['Tidak_Match'] = wahana_stats['Tidak_Match'].astype(int)
+                
+                # Tambahkan kolom terisi/kapasitas
+                wahana_stats['Terisi/Kapasitas'] = wahana_stats.apply(
+                    lambda x: f"{int(x['Total_Peserta'])}/{int(x['Kapasitas Optimal'])}", axis=1)
+                
+                # Tambahkan kolom persentase terisi
+                wahana_stats['Persentase_Terisi'] = (wahana_stats['Total_Peserta'] / wahana_stats['Kapasitas Optimal'] * 100).round(1)
+                wahana_stats['Persentase_Terisi'] = wahana_stats['Persentase_Terisi'].map('{:.1f}%'.format)
+                
+                # Try-catch approach for the percentage calculation
+                try:
+                    # First ensure numeric types for both columns
+                    wahana_stats['Match'] = pd.to_numeric(wahana_stats['Match'], errors='coerce').fillna(0)
+                    wahana_stats['Total_Peserta'] = pd.to_numeric(wahana_stats['Total_Peserta'], errors='coerce').fillna(0)
+                    
+                    # Now calculate the percentage safely
+                    wahana_stats['Persentase_Match'] = wahana_stats.apply(
+                        lambda x: (x['Match'] / x['Total_Peserta'] * 100).round(1) 
+                                if x['Total_Peserta'] > 0 else 0, 
+                        axis=1
+                    )
+                    wahana_stats['Persentase_Match'] = wahana_stats['Persentase_Match'].map('{:.1f}%'.format)
+                except Exception as e:
+                    st.error(f"Error calculating match percentages: {str(e)}")
+                    # Fallback implementation
+                    wahana_stats['Persentase_Match'] = wahana_stats.apply(
+                        lambda x: '0.0%' if x['Total_Peserta'] == 0 
+                                else f"{(x['Match']/x['Total_Peserta']*100):.1f}%", 
+                        axis=1
+                    )
+                
+                # Urutkan berdasarkan Total Peserta (descending)
+                wahana_stats = wahana_stats.sort_values(by='Total_Peserta', ascending=False)
+                
+                # Tampilkan tabel statistik dengan formatting yang lebih baik
                 st.dataframe(
-                    wahana_stats.style.background_gradient(subset=['Match'], cmap='Greens'),
+                    wahana_stats.style
+                    .background_gradient(subset=['Total_Peserta'], cmap='Blues')
+                    .background_gradient(subset=['Match'], cmap='Greens'),
                     use_container_width=True
                 )
+                
+                # Visualisasi persentase terisi
+                st.subheader("Persentase Kapasitas Terisi per Wahana")
+                
+                # Siapkan data untuk visualisasi
+                occupancy_data = wahana_stats.copy()
+                occupancy_data['Persentase_Terisi_Numeric'] = (occupancy_data['Total_Peserta'] / occupancy_data['Kapasitas Optimal'] * 100).round(1)
+                
+                # Urutkan berdasarkan persentase terisi
+                occupancy_data = occupancy_data.sort_values('Persentase_Terisi_Numeric', ascending=False)
+                
+                # Buat warna berdasarkan persentase terisi
+                def get_color(pct):
+                    if pct >= 90:
+                        return '#C0392B'  # Merah untuk hampir/penuh
+                    elif pct >= 60:
+                        return '#F39C12'  # Oranye untuk cukup terisi
+                    elif pct > 0:
+                        return '#27AE60'  # Hijau untuk kurang terisi
+                    else:
+                        return '#7F8C8D'  # Abu-abu untuk kosong
+                
+                occupancy_data['Color'] = occupancy_data['Persentase_Terisi_Numeric'].apply(get_color)
+                
+                fig = px.bar(
+                    occupancy_data,
+                    x='Nama Wahana',
+                    y='Persentase_Terisi_Numeric',
+                    title='Persentase Kapasitas Terisi per Wahana',
+                    text='Terisi/Kapasitas',
+                    labels={'Persentase_Terisi_Numeric': 'Persentase Terisi (%)', 'Nama Wahana': 'Nama Wahana'},
+                    color='Persentase_Terisi_Numeric',
+                    color_continuous_scale='RdYlGn_r'
+                )
+                
+                # Tambahkan garis 100%
+                fig.add_shape(
+                    type="line",
+                    x0=-0.5,
+                    y0=100,
+                    x1=len(occupancy_data)-0.5,
+                    y1=100,
+                    line=dict(color="red", width=2, dash="dash"),
+                )
+                
+                fig.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
                 
                 # Tambahkan download button untuk hasil penjadwalan
                 csv = hasil_awal.to_csv(index=False)
@@ -833,7 +961,7 @@ def main():
                     file_name="hasil_penjadwalan_awal.csv",
                     mime="text/csv",
                 )
-    
+            
     with tab3:
         st.header("Simulasi Gangguan")
         
