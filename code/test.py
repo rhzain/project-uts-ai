@@ -4,6 +4,7 @@ from collections import defaultdict
 import tempfile
 import os
 import plotly.express as px
+import math
 
 class PenjadwalanAdaptif:
     def __init__(self):
@@ -115,8 +116,13 @@ class PenjadwalanAdaptif:
                 else:
                     self.wahana_df.at[idx, 'Status Gangguan'] = 'Stabil'
     
-    def redistribusi_adaptif(self):
-        """Melakukan penyesuaian penempatan setelah gangguan dengan algoritma yang lebih komprehensif"""
+    def redistribusi_adaptif(self, prioritas="stabilitas"):
+        """
+        Melakukan penyesuaian penempatan setelah gangguan dengan beberapa prioritas:
+        - "stabilitas": Prioritaskan stabilisasi rasio pasien:peserta di seluruh wahana (default)
+        - "preferensi": Prioritaskan kesesuaian preferensi peserta
+        - "minimal": Prioritaskan pemindahan minimal (hanya yang kritis)
+        """
         if self.penempatan_awal is None:
             raise ValueError("Penjadwalan awal belum dilakukan")
             
@@ -137,43 +143,108 @@ class PenjadwalanAdaptif:
             if status_wahana == 'Tutup':
                 peserta_dipindahkan.append((peserta_id, 'critical'))
         
-        # Lalu dari wahana Overload (tinggi)
-        for peserta_id, wahana in penempatan_baru.items():
-            status_wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana]['Status Gangguan'].values[0]
-            if status_wahana == 'Overload' and not any(pid == peserta_id for pid, _ in peserta_dipindahkan):
-                peserta_dipindahkan.append((peserta_id, 'high'))
+        # Lalu dari wahana Overload (tinggi) - skip jika prioritas minimal
+        if prioritas != "minimal":
+            for peserta_id, wahana in penempatan_baru.items():
+                status_wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana]['Status Gangguan'].values[0]
+                if status_wahana == 'Overload' and not any(pid == peserta_id for pid, _ in peserta_dipindahkan):
+                    peserta_dipindahkan.append((peserta_id, 'high'))
         
-        # Urutkan berdasarkan prioritas (critical > high)
-        peserta_dipindahkan.sort(key=lambda x: 0 if x[1] == 'critical' else 1)
+        # Jika prioritas preferensi, tambahkan peserta yang preferensinya tidak cocok
+        if prioritas == "preferensi":
+            for peserta_id, wahana in penempatan_baru.items():
+                if any(pid == peserta_id for pid, _ in peserta_dipindahkan):
+                    continue  # Skip jika sudah dalam daftar dipindahkan
+                    
+                peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana].iloc[0]
+                
+                # Jika preferensi tidak cocok dan status tidak kritis, pertimbangkan untuk pindah
+                if (peserta['Preferensi Pekerjaan'] != wahana_data['Kategori Pekerjaan'] and 
+                    wahana_data['Status Gangguan'] not in ['Tutup', 'Overload']):
+                    peserta_dipindahkan.append((peserta_id, 'medium'))
         
-        # Daftar wahana underutilized yang perlu diisi
+        # Urutkan berdasarkan prioritas (critical > high > medium)
+        peserta_dipindahkan.sort(key=lambda x: 0 if x[1] == 'critical' else (1 if x[1] == 'high' else 2))
+        
+        # Daftar wahana untuk prioritas penempatan
         wahana_underutilized = self.wahana_df[
             self.wahana_df['Status Gangguan'] == 'Underutilized'
         ]['Nama Wahana'].tolist()
         
-        # 2. Prioritaskan peserta untuk wahana underutilized
+        wahana_stabil = self.wahana_df[
+            self.wahana_df['Status Gangguan'] == 'Stabil'
+        ]['Nama Wahana'].tolist()
+        
+        # 2. Prioritaskan peserta untuk wahana berdasarkan prioritas yang dipilih
         for peserta_id, priority in peserta_dipindahkan:
             peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
             wahana_asal = penempatan_baru[peserta_id]
             
-            # Prioritaskan wahana underutilized dan stabil
+            # Prioritaskan wahana berdasarkan tipe prioritas
             skor_wahana = []
             
-            # Tambahkan wahana underutilized dengan bobot lebih tinggi
-            for nama_wahana in wahana_underutilized:
-                if nama_wahana != wahana_asal and kapasitas_tersedia[nama_wahana] > 0:
-                    wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
-                    # Gunakan fungsi scoring dengan pasien gangguan
-                    skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
-                    # Prioritaskan wahana underutilized dengan bonus skor
-                    skor += 15  # Bonus untuk wahana underutilized
-                    skor_wahana.append((nama_wahana, skor))
+            # PRIORITAS PREFERENSI: Utamakan wahana dengan kategori yang sesuai preferensi
+            if prioritas == "preferensi":
+                # Tambahkan wahana dengan kategori yang sesuai preferensi
+                for _, wahana_data in self.wahana_df.iterrows():
+                    if (wahana_data['Nama Wahana'] != wahana_asal and 
+                        kapasitas_tersedia[wahana_data['Nama Wahana']] > 0 and
+                        wahana_data['Status Gangguan'] != 'Tutup'):
+                        
+                        # Beri skor dasar
+                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                        
+                        # Beri bonus besar untuk kesesuaian preferensi
+                        if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                            skor += 50
+                        
+                        # Bonus berdasarkan status wahana
+                        if wahana_data['Status Gangguan'] == 'Underutilized':
+                            skor += 15
+                        elif wahana_data['Status Gangguan'] == 'Stabil':
+                            skor += 10
+                            
+                        skor_wahana.append((wahana_data['Nama Wahana'], skor))
             
-            # Tambahkan wahana stabil sebagai opsi
-            for _, wahana in self.wahana_df[self.wahana_df['Status Gangguan'] == 'Stabil'].iterrows():
-                if wahana['Nama Wahana'] != wahana_asal and kapasitas_tersedia[wahana['Nama Wahana']] > 0:
-                    skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
-                    skor_wahana.append((wahana['Nama Wahana'], skor))
+            # PRIORITAS STABILITAS: Prioritaskan wahana berdasarkan status
+            elif prioritas == "stabilitas":
+                # Tambahkan wahana underutilized dengan bobot tinggi
+                for nama_wahana in wahana_underutilized:
+                    if nama_wahana != wahana_asal and kapasitas_tersedia[nama_wahana] > 0:
+                        wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
+                        # Gunakan fungsi scoring dengan pasien gangguan
+                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                        # Prioritaskan wahana underutilized dengan bonus skor
+                        skor += 15  # Bonus untuk wahana underutilized
+                        skor_wahana.append((nama_wahana, skor))
+                
+                # Tambahkan wahana stabil sebagai opsi
+                for nama_wahana in wahana_stabil:
+                    if nama_wahana != wahana_asal and kapasitas_tersedia[nama_wahana] > 0:
+                        wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
+                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                        skor_wahana.append((nama_wahana, skor))
+            
+            # PRIORITAS MINIMAL: Hanya pindahkan yang benar-benar perlu (dari wahana Tutup)
+            else:  # prioritas == "minimal"
+                # Prioritaskan wahana dengan preferensi yang cocok
+                for nama_wahana, kapasitas in kapasitas_tersedia.items():
+                    if nama_wahana != wahana_asal and kapasitas > 0:
+                        wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
+                        skor = 0
+                        
+                        # Berikan skor tinggi untuk kesesuaian preferensi
+                        if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                            skor += 80
+                        
+                        # Berikan skor berdasarkan status wahana
+                        if wahana_data['Status Gangguan'] == 'Stabil':
+                            skor += 10
+                        elif wahana_data['Status Gangguan'] == 'Underutilized':
+                            skor += 5
+                            
+                        skor_wahana.append((nama_wahana, skor))
             
             # Urutkan berdasarkan skor tertinggi
             skor_wahana.sort(key=lambda x: x[1], reverse=True)
@@ -185,37 +256,46 @@ class PenjadwalanAdaptif:
                 kapasitas_tersedia[wahana_baru] -= 1
                 kapasitas_tersedia[wahana_asal] += 1
                 
-                # Hapus dari daftar underutilized jika sudah terisi optimal
-                pasien_count = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_baru]['Pasien Gangguan'].values[0]
-                current_count = sum(1 for w in penempatan_baru.values() if w == wahana_baru)
-                
-                if current_count > 0 and pasien_count / current_count >= 5:  # Tidak lagi underutilized
-                    if wahana_baru in wahana_underutilized:
-                        wahana_underutilized.remove(wahana_baru)
+                # Jika prioritas stabilitas, update status underutilized
+                if prioritas == "stabilitas":
+                    # Hapus dari daftar underutilized jika sudah terisi optimal
+                    pasien_count = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_baru]['Pasien Gangguan'].values[0]
+                    current_count = sum(1 for w in penempatan_baru.values() if w == wahana_baru)
+                    
+                    if current_count > 0 and pasien_count / current_count >= 5:  # Tidak lagi underutilized
+                        if wahana_baru in wahana_underutilized:
+                            wahana_underutilized.remove(wahana_baru)
         
         # 3. Distribusi peserta yang masih memiliki wahana bermasalah setelah iterasi pertama
-        for peserta_id, wahana in list(penempatan_baru.items()):
-            status_wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana]['Status Gangguan'].values[0]
-            
-            if status_wahana in ['Overload', 'Tutup']:
-                peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+        # Hanya jika prioritas bukan minimal
+        if prioritas != "minimal":
+            for peserta_id, wahana in list(penempatan_baru.items()):
+                status_wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana]['Status Gangguan'].values[0]
                 
-                # Cari wahana yang masih tersedia kapasitas (termasuk yang sebelumnya full)
-                skor_wahana = []
-                for _, wahana_data in self.wahana_df.iterrows():
-                    if wahana_data['Nama Wahana'] != wahana and kapasitas_tersedia[wahana_data['Nama Wahana']] > 0:
-                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
-                        skor_wahana.append((wahana_data['Nama Wahana'], skor))
-                
-                # Urutkan berdasarkan skor tertinggi
-                skor_wahana.sort(key=lambda x: x[1], reverse=True)
-                
-                # Pindahkan peserta ke wahana baru jika ada yang cocok
-                if skor_wahana:
-                    wahana_baru = skor_wahana[0][0]
-                    penempatan_baru[peserta_id] = wahana_baru
-                    kapasitas_tersedia[wahana_baru] -= 1
-                    kapasitas_tersedia[wahana] += 1
+                if status_wahana in ['Tutup']:  # Overload tidak diprioritaskan untuk redistribusi kedua jika priroitas bukan stabilitas
+                    peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                    
+                    # Cari wahana yang masih tersedia kapasitas
+                    skor_wahana = []
+                    for _, wahana_data in self.wahana_df.iterrows():
+                        if wahana_data['Nama Wahana'] != wahana and kapasitas_tersedia[wahana_data['Nama Wahana']] > 0:
+                            skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                            
+                            # Sesuaikan pembobotan berdasarkan prioritas
+                            if prioritas == "preferensi" and peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                                skor += 40
+                            
+                            skor_wahana.append((wahana_data['Nama Wahana'], skor))
+                    
+                    # Urutkan berdasarkan skor tertinggi
+                    skor_wahana.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Pindahkan peserta ke wahana baru jika ada yang cocok
+                    if skor_wahana:
+                        wahana_baru = skor_wahana[0][0]
+                        penempatan_baru[peserta_id] = wahana_baru
+                        kapasitas_tersedia[wahana_baru] -= 1
+                        kapasitas_tersedia[wahana] += 1
         
         self.penempatan_akhir = penempatan_baru
         return penempatan_baru
@@ -508,7 +588,431 @@ class PenjadwalanAdaptif:
         else:
             return "Perlu Perbaikan - Banyak ketidaksesuaian preferensi dan beban kerja tidak merata"
         
+    def penjadwalan_distribusi_merata(self):
+        """Algoritma penjadwalan dengan distribusi kecocokan lebih merata antar wahana"""
+        # Inisialisasi
+        penempatan = {}
+        kapasitas_tersedia = self.wahana_df.set_index('Nama Wahana')['Kapasitas Optimal'].to_dict()
         
+        # Tracking skor kecocokan per wahana untuk pemerataan
+        skor_wahana = {wahana: [] for wahana in kapasitas_tersedia.keys()}
+        
+        # Hitung semua skor kecocokan untuk semua pasangan peserta-wahana
+        skor_kecocokan_global = []
+        
+        for _, peserta in self.peserta_df.iterrows():
+            for _, wahana in self.wahana_df.iterrows():
+                skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
+                skor_kecocokan_global.append({
+                    'ID Peserta': peserta['ID Peserta'],
+                    'Nama Wahana': wahana['Nama Wahana'],
+                    'Skor': skor,
+                    'Preferensi Match': peserta['Preferensi Pekerjaan'] == wahana['Kategori Pekerjaan']
+                })
+        
+        # Set untuk melacak peserta yang sudah ditempatkan
+        peserta_ditempatkan = set()
+        wahana_terisi = {wahana: 0 for wahana in kapasitas_tersedia.keys()}
+        
+        # Fase 1: Penempatan awal untuk memastikan semua wahana mendapat minimal 1 peserta
+        # Ini mencegah wahana tetap kosong karena tidak mendapat giliran di algoritma utama
+        wahana_belum_terisi = [w for w, count in wahana_terisi.items() if count == 0 and kapasitas_tersedia[w] > 0]
+        
+        for wahana_nama in wahana_belum_terisi:
+            # Cari peserta terbaik untuk wahana ini
+            skor_terbaik = []
+            for _, peserta in self.peserta_df.iterrows():
+                if peserta['ID Peserta'] not in peserta_ditempatkan:
+                    wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_nama].iloc[0]
+                    skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                    skor_terbaik.append((peserta['ID Peserta'], skor))
+            
+            if skor_terbaik:
+                # Pilih peserta dengan skor terbaik
+                skor_terbaik.sort(key=lambda x: x[1], reverse=True)
+                peserta_id = skor_terbaik[0][0]
+                skor = skor_terbaik[0][1]
+                
+                penempatan[peserta_id] = wahana_nama
+                kapasitas_tersedia[wahana_nama] -= 1
+                wahana_terisi[wahana_nama] += 1
+                peserta_ditempatkan.add(peserta_id)
+                skor_wahana[wahana_nama].append(skor)
+        
+        # Fase 2: Distribusi berdasarkan pemerataan skor
+        # Lakukan iterasi sampai semua peserta ditempatkan atau kapasitas habis
+        iterasi_max = len(self.peserta_df) * 2  # Batasi jumlah iterasi untuk menghindari infinite loop
+        iterasi = 0
+        
+        peserta_tersisa = [p for p in self.peserta_df['ID Peserta'] if p not in peserta_ditempatkan]
+        
+        while peserta_tersisa and any(k > 0 for k in kapasitas_tersedia.values()) and iterasi < iterasi_max:
+            iterasi += 1
+            
+            # Hitung rata-rata skor saat ini untuk setiap wahana
+            avg_skor_wahana = {}
+            for wahana, skor_list in skor_wahana.items():
+                if skor_list:  # Jika ada skor
+                    avg_skor_wahana[wahana] = sum(skor_list) / len(skor_list)
+                else:  # Jika belum ada peserta
+                    avg_skor_wahana[wahana] = 0
+            
+            # Hitung global mean dan standard deviation dari skor rata-rata wahana
+            if avg_skor_wahana:
+                values = [v for v in avg_skor_wahana.values() if v > 0]
+                if values:
+                    global_mean = sum(values) / len(values)
+                    global_stddev = (sum((x - global_mean) ** 2 for x in values) / len(values)) ** 0.5 if len(values) > 1 else 0
+                else:
+                    global_mean = 0
+                    global_stddev = 0
+            else:
+                global_mean = 0
+                global_stddev = 0
+            
+            # Cari pasangan (peserta, wahana) berikutnya yang optimal untuk keseimbangan
+            best_pair = None
+            best_score = -float('inf')
+            
+            for peserta_id in peserta_tersisa[:min(len(peserta_tersisa), 30)]:  # Batasi pencarian untuk performa
+                peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                
+                for wahana_nama, kapasitas in kapasitas_tersedia.items():
+                    if kapasitas <= 0:  # Skip wahana yang sudah penuh
+                        continue
+                    
+                    wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_nama].iloc[0]
+                    base_skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                    
+                    # Faktor pengisian kapasitas - prioritaskan wahana yang masih kosong
+                    kapasitas_faktor = 2.0 * (1 - (wahana_terisi[wahana_nama] / wahana_data['Kapasitas Optimal']))
+                    
+                    # Faktor keseimbangan skor - simulasikan penempatan ini
+                    skor_simulasi = skor_wahana[wahana_nama] + [base_skor]
+                    new_avg = sum(skor_simulasi) / len(skor_simulasi)
+                    
+                    # Hitung efek perubahan pada standar deviasi global
+                    # Copy rata-rata skor untuk simulasi
+                    simulated_avgs = avg_skor_wahana.copy()
+                    simulated_avgs[wahana_nama] = new_avg
+                    
+                    # Hitung standar deviasi hasil simulasi
+                    sim_values = [v for v in simulated_avgs.values() if v > 0]
+                    if sim_values:
+                        sim_mean = sum(sim_values) / len(sim_values)
+                        sim_stddev = (sum((x - sim_mean) ** 2 for x in sim_values) / len(sim_values)) ** 0.5 if len(sim_values) > 1 else 0
+                    else:
+                        sim_stddev = 0
+                    
+                    # Faktor perbaikan standar deviasi (semakin berkurang deviasi, semakin baik)
+                    stddev_improvement = global_stddev - sim_stddev if global_stddev > 0 else 0
+                    
+                    # Faktor keseimbangan: menghargai penempatan yang mendekatkan rata-rata wahana ke mean global
+                    current_distance = abs(avg_skor_wahana.get(wahana_nama, 0) - global_mean) if avg_skor_wahana.get(wahana_nama, 0) > 0 else abs(0 - global_mean)
+                    new_distance = abs(new_avg - global_mean)
+                    balance_factor = current_distance - new_distance  # Positif jika semakin mendekati mean global
+                    
+                    # Faktor preferensi peserta tetap dipertimbangkan
+                    preferensi_faktor = 1.5 if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan'] else 1.0
+                    
+                    # Perhitungan skor akhir dengan prioritas lebih tinggi pada keseimbangan
+                    final_score = (
+                        base_skor * 0.4 +                 # Skor kecocokan dasar (40%)
+                        kapasitas_faktor * 10 +           # Faktor pengisian kapasitas (10-20)
+                        balance_factor * 15 +             # Faktor keseimbangan (dampak terhadap mean global) (0-15)
+                        stddev_improvement * 25 +         # Faktor perbaikan standar deviasi (0-25)
+                        preferensi_faktor * 10            # Faktor preferensi (10-15)
+                    )
+                    
+                    if final_score > best_score:
+                        best_score = final_score
+                        best_pair = (peserta_id, wahana_nama, base_skor)
+            
+            # Jika menemukan pasangan optimal, tempatkan peserta
+            if best_pair:
+                peserta_id, wahana_nama, base_skor = best_pair
+                penempatan[peserta_id] = wahana_nama
+                kapasitas_tersedia[wahana_nama] -= 1
+                wahana_terisi[wahana_nama] += 1
+                skor_wahana[wahana_nama].append(base_skor)
+                peserta_ditempatkan.add(peserta_id)
+                peserta_tersisa.remove(peserta_id)
+            else:
+                # Jika tidak ada pasangan optimal, keluar dari loop untuk menghindari infinite
+                break
+        
+        # Fase 3: Distribusi sisa peserta (jika masih ada)
+        for peserta_id in peserta_tersisa:
+            peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+            
+            # Cari wahana dengan kapasitas tersisa
+            wahana_tersedia = [(w, k) for w, k in kapasitas_tersedia.items() if k > 0]
+            if not wahana_tersedia:
+                break  # Tidak ada kapasitas tersisa
+                
+            # Pilih wahana terbaik berdasarkan skor kecocokan tanpa mempertimbangkan keseimbangan
+            best_wahana = None
+            best_score = -1
+            
+            for wahana_nama, _ in wahana_tersedia:
+                wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_nama].iloc[0]
+                skor = self.hitung_skor_kecocokan_baru(peserta, wahana_data.to_dict())
+                
+                # Preferensi masih diutamakan untuk penempatan terakhir
+                if peserta['Preferensi Pekerjaan'] == wahana_data['Kategori Pekerjaan']:
+                    skor += 20
+                    
+                if skor > best_score:
+                    best_score = skor
+                    best_wahana = wahana_nama
+            
+            if best_wahana:
+                penempatan[peserta_id] = best_wahana
+                kapasitas_tersedia[best_wahana] -= 1
+                wahana_terisi[best_wahana] += 1
+                skor_wahana[best_wahana].append(best_score)
+                peserta_ditempatkan.add(peserta_id)
+        
+        # Simpan hasil penjadwalan
+        self.penempatan_awal = penempatan
+        self.peserta_tidak_tertempatkan = list(set(self.peserta_df['ID Peserta']) - peserta_ditempatkan)
+        
+        # Hitung metrik kualitas
+        self.hitung_rata_rata_skor()
+        self.hitung_deviasi_kecocokan()
+        
+        return penempatan
+        
+    def hitung_deviasi_kecocokan(self):
+        """Menghitung deviasi skor kecocokan antar wahana untuk evaluasi keseimbangan"""
+        if not self.penempatan_awal:
+            return 0
+        
+        skor_per_wahana = defaultdict(list)
+        
+        for peserta_id, wahana_nama in self.penempatan_awal.items():
+            peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+            wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == wahana_nama].iloc[0]
+            
+            skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
+            skor_per_wahana[wahana_nama].append(skor)
+        
+        # Hitung rata-rata per wahana
+        rata_rata_per_wahana = {
+            wahana: sum(skor_list) / len(skor_list) 
+            for wahana, skor_list in skor_per_wahana.items() if skor_list
+        }
+        
+        # Hitung deviasi standar antar rata-rata wahana
+        if rata_rata_per_wahana:
+            nilai_rata_rata = list(rata_rata_per_wahana.values())
+            mean = sum(nilai_rata_rata) / len(nilai_rata_rata)
+            deviasi = math.sqrt(sum((x - mean) ** 2 for x in nilai_rata_rata) / len(nilai_rata_rata))
+            
+            self.deviasi_kecocokan = {
+                "std_dev": deviasi,
+                "min_skor": min(nilai_rata_rata),
+                "max_skor": max(nilai_rata_rata),
+                "range_skor": max(nilai_rata_rata) - min(nilai_rata_rata),
+                "rata_rata_per_wahana": rata_rata_per_wahana
+            }
+            
+            return self.deviasi_kecocokan
+        
+        return {"std_dev": 0, "min_skor": 0, "max_skor": 0, "range_skor": 0, "rata_rata_per_wahana": {}}
+        
+    def penjadwalan_dengan_prioritas(self, prioritas="seimbang"):
+        """
+        Algoritma penjadwalan dengan dua tipe prioritas:
+        - "kapasitas": Prioritaskan mengisi semua kapasitas wahana
+        - "seimbang": Prioritaskan stabilitas meskipun mungkin ada peserta tidak ditempatkan
+        """
+        # Inisialisasi
+        penempatan = {}
+        kapasitas_tersedia = self.wahana_df.set_index('Nama Wahana')['Kapasitas Optimal'].to_dict()
+        
+        # Urutkan peserta berdasarkan preferensi (untuk konsistensi hasil)
+        peserta_sorted = self.peserta_df.sort_values(['Preferensi Pekerjaan', 'ID Peserta'])
+        
+        # PENDEKATAN 1: PRIORITAS KAPASITAS
+        if prioritas == "kapasitas":
+            # Hitung kapasitas total dan jumlah peserta
+            total_kapasitas = self.wahana_df['Kapasitas Optimal'].sum()
+            total_peserta = len(self.peserta_df)
+            
+            # Fase 1: Distribusi peserta untuk memenuhi kapasitas minimum di setiap wahana
+            for _, wahana in self.wahana_df.iterrows():
+                # Hitung kapasitas minimum yang perlu diisi (persentase dari kapasitas optimal)
+                # Gunakan rasio total peserta:total kapasitas sebagai acuan
+                rasio_populasi = min(1.0, total_peserta / total_kapasitas)
+                min_kapasitas = math.ceil(wahana['Kapasitas Optimal'] * rasio_populasi * 0.7)  # Minimal 70% dari proporsi
+                
+                # Cari peserta yang preferensinya cocok terlebih dahulu
+                peserta_cocok = []
+                peserta_tidak_cocok = []
+                
+                for _, peserta in peserta_sorted.iterrows():
+                    if peserta['ID Peserta'] not in penempatan:
+                        if peserta['Preferensi Pekerjaan'] == wahana['Kategori Pekerjaan']:
+                            peserta_cocok.append(peserta['ID Peserta'])
+                        else:
+                            peserta_tidak_cocok.append(peserta['ID Peserta'])
+                
+                # Isi dengan peserta yang preferensinya cocok dulu
+                peserta_terpilih = []
+                while len(peserta_terpilih) < min_kapasitas and peserta_cocok:
+                    peserta_terpilih.append(peserta_cocok.pop(0))
+                
+                # Jika masih kurang, tambahkan peserta yang tidak cocok preferensinya
+                while len(peserta_terpilih) < min_kapasitas and peserta_tidak_cocok:
+                    peserta_terpilih.append(peserta_tidak_cocok.pop(0))
+                
+                # Tempatkan peserta yang terpilih
+                for peserta_id in peserta_terpilih:
+                    if kapasitas_tersedia[wahana['Nama Wahana']] > 0:
+                        penempatan[peserta_id] = wahana['Nama Wahana']
+                        kapasitas_tersedia[wahana['Nama Wahana']] -= 1
+            
+            # Fase 2: Distribusi sisa peserta untuk mengoptimalkan preferensi
+            peserta_tersisa = [p for p in peserta_sorted['ID Peserta'] if p not in penempatan]
+            
+            for peserta_id in peserta_tersisa:
+                peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                
+                # Cari wahana dengan preferensi yang cocok terlebih dahulu
+                wahana_cocok = self.wahana_df[
+                    (self.wahana_df['Kategori Pekerjaan'] == peserta['Preferensi Pekerjaan'])
+                ]
+                
+                wahana_terpilih = None
+                for _, wahana in wahana_cocok.iterrows():
+                    if kapasitas_tersedia[wahana['Nama Wahana']] > 0:
+                        wahana_terpilih = wahana['Nama Wahana']
+                        break
+                
+                # Jika tidak ada wahana cocok yang tersedia, cari wahana lain
+                if not wahana_terpilih:
+                    for nama_wahana, kapasitas in kapasitas_tersedia.items():
+                        if kapasitas > 0:
+                            wahana_terpilih = nama_wahana
+                            break
+                
+                # Tempatkan peserta jika ada wahana yang tersedia
+                if wahana_terpilih:
+                    penempatan[peserta_id] = wahana_terpilih
+                    kapasitas_tersedia[wahana_terpilih] -= 1
+        
+        # PENDEKATAN 2: PRIORITAS STABILITAS/KESEIMBANGAN
+        else:  # prioritas == "seimbang"
+            # Identifikasi wahana berdasarkan status pasien untuk distribusi awal
+            wahana_stabil = self.wahana_df[self.wahana_df['Status Gangguan'] == 'Stabil']
+            
+            # Fase 1: Distribusi untuk wahana stabil, prioritas match preferensi
+            for _, wahana in wahana_stabil.iterrows():
+                # Tentukan jumlah optimal peserta untuk wahana ini
+                pasien_count = wahana['Pasien Normal']
+                target_ratio = 10  # Target rasio pasien:peserta = 10 (di tengah range stabil)
+                optimal_peserta = max(1, int(pasien_count / target_ratio))
+                optimal_peserta = min(optimal_peserta, wahana['Kapasitas Optimal'])
+                
+                # Cari peserta yang preferensinya cocok
+                peserta_cocok = []
+                for _, peserta in peserta_sorted.iterrows():
+                    if (peserta['ID Peserta'] not in penempatan and 
+                        peserta['Preferensi Pekerjaan'] == wahana['Kategori Pekerjaan']):
+                        peserta_cocok.append(peserta['ID Peserta'])
+                    
+                    if len(peserta_cocok) >= optimal_peserta:
+                        break
+                
+                # Tempatkan peserta yang cocok
+                for i, peserta_id in enumerate(peserta_cocok):
+                    if i < optimal_peserta and kapasitas_tersedia[wahana['Nama Wahana']] > 0:
+                        penempatan[peserta_id] = wahana['Nama Wahana']
+                        kapasitas_tersedia[wahana['Nama Wahana']] -= 1
+            
+            # Fase 2: Distribusi untuk underutilized
+            wahana_underutilized = self.wahana_df[self.wahana_df['Status Gangguan'] == 'Underutilized']
+            
+            for _, wahana in wahana_underutilized.iterrows():
+                # Tentukan jumlah minimal peserta untuk wahana ini
+                pasien_count = wahana['Pasien Normal']
+                target_ratio = 5  # Target rasio pasien:peserta = 5 (batas bawah stabil)
+                min_peserta = max(1, int(pasien_count / target_ratio))
+                current_count = sum(1 for w in penempatan.values() if w == wahana['Nama Wahana'])
+                needed_peserta = max(0, min_peserta - current_count)
+                
+                # Batasi dengan kapasitas
+                needed_peserta = min(needed_peserta, kapasitas_tersedia[wahana['Nama Wahana']])
+                
+                # Cari peserta yang belum ditempatkan
+                peserta_tersedia = []
+                for _, peserta in peserta_sorted.iterrows():
+                    if peserta['ID Peserta'] not in penempatan:
+                        # Hitung skor kecocokan
+                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
+                        peserta_tersedia.append((peserta['ID Peserta'], skor))
+                
+                # Urutkan berdasarkan skor kecocokan
+                peserta_tersedia.sort(key=lambda x: x[1], reverse=True)
+                
+                # Tempatkan peserta berdasarkan skor
+                for i, (peserta_id, _) in enumerate(peserta_tersedia):
+                    if i < needed_peserta:
+                        penempatan[peserta_id] = wahana['Nama Wahana']
+                        kapasitas_tersedia[wahana['Nama Wahana']] -= 1
+                    else:
+                        break
+            
+            # Fase 3: Distribusi sisa peserta (jika masih ada kapasitas)
+            peserta_tersisa = [p for p in peserta_sorted['ID Peserta'] if p not in penempatan]
+            
+            # Hitung skor kecocokan untuk semua pasangan tersisa
+            skor_kecocokan = []
+            
+            for peserta_id in peserta_tersisa:
+                peserta = self.peserta_df[self.peserta_df['ID Peserta'] == peserta_id].iloc[0]
+                
+                for nama_wahana, kapasitas in kapasitas_tersedia.items():
+                    if kapasitas > 0:
+                        wahana = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
+                        skor = self.hitung_skor_kecocokan_baru(peserta, wahana.to_dict())
+                        skor_kecocokan.append((peserta_id, nama_wahana, skor))
+            
+            # Urutkan berdasarkan skor
+            skor_kecocokan.sort(key=lambda x: x[2], reverse=True)
+            
+            # Tempatkan berdasarkan skor tertinggi dengan batasan stabilitas
+            for peserta_id, nama_wahana, _ in skor_kecocokan:
+                # Skip jika peserta sudah ditempatkan
+                if peserta_id in penempatan:
+                    continue
+                    
+                # Skip jika wahana sudah mencapai kapasitas optimal
+                if kapasitas_tersedia[nama_wahana] <= 0:
+                    continue
+                
+                # Hitung rasio pasien:peserta saat ini untuk wahana ini
+                current_count = sum(1 for w in penempatan.values() if w == nama_wahana) + 1  # +1 untuk peserta ini
+                wahana_data = self.wahana_df[self.wahana_df['Nama Wahana'] == nama_wahana].iloc[0]
+                pasien_count = wahana_data['Pasien Normal']
+                
+                # Cek apakah penempatan ini menjaga stabilitas rasio
+                rasio = pasien_count / current_count if current_count > 0 else 0
+                
+                # Jika rasio masih dalam range stabil (5-20) atau wahana underutilized, tempatkan peserta
+                if 5 <= rasio <= 20 or wahana_data['Status Gangguan'] == 'Underutilized':
+                    penempatan[peserta_id] = nama_wahana
+                    kapasitas_tersedia[nama_wahana] -= 1
+        
+        # Simpan hasil dan hitung kualitas
+        self.penempatan_awal = penempatan
+        self.peserta_tidak_tertempatkan = list(set(self.peserta_df['ID Peserta']) - set(penempatan.keys()))
+        
+        # Hitung rata-rata skor kecocokan
+        self.hitung_rata_rata_skor()
+        
+        return penempatan
 
 
 def main():
@@ -722,81 +1226,65 @@ def main():
                 else:
                     st.error("Data wahana atau peserta kosong. Mohon lengkapi data terlebih dahulu.")
     
+    # Modifikasi di bagian tab2 untuk melakukan reset dan refresh statistik saat ganti penjadwalan
     with tab2:
         st.header("Penjadwalan Awal")
         
         if not st.session_state.data_loaded:
             st.warning("Silakan input data terlebih dahulu di tab Input Data")
         else:
+            # Tambahkan state untuk melacak metode penjadwalan yang terakhir digunakan
+            if 'last_scheduling_method' not in st.session_state:
+                st.session_state.last_scheduling_method = None
+            
+            # Tambahkan opsi pemilihan tipe penjadwalan
+            col1, col2 = st.columns([2, 3])
+            with col1:
+                penjadwalan_type = st.radio(
+                    "Pilih Tipe Penjadwalan:", 
+                    ["Distribusi Merata", "Prioritas Kapasitas", "Prioritas Stabilitas"],
+                    help="Distribusi Merata: Skor kecocokan merata antar wahana\n"
+                        "Prioritas Kapasitas: Mengutamakan pengisian kapasitas wahana\n"
+                        "Prioritas Stabilitas: Mengutamakan kestabilan rasio pasien:peserta"
+                )
+            
+            with col2:
+                st.info(
+                    "**Distribusi Merata**: Algoritma akan mendistribusikan peserta dengan skor kecocokan yang lebih merata antar wahana.\n\n"
+                    "**Prioritas Kapasitas**: Mengutamakan pengisian seluruh kapasitas wahana, meskipun mungkin ada trade-off pada kestabilan.\n\n"
+                    "**Prioritas Stabilitas**: Mengutamakan kestabilan rasio pasien:peserta, meskipun mungkin tidak semua peserta ditempatkan."
+                )
+            
+            # Reset jika metode penjadwalan berubah
+            if st.session_state.penjadwalan_done and st.session_state.last_scheduling_method != penjadwalan_type:
+                if st.button(f"Ubah Penjadwalan ke {penjadwalan_type}"):
+                    st.session_state.penjadwalan_done = False
+                    st.session_state.gangguan_done = False
+                    st.session_state.penyesuaian_done = False
+                    st.session_state.last_scheduling_method = penjadwalan_type
+                    st.rerun()  # Refresh halaman
+            
             if st.button("Lakukan Penjadwalan Awal"):
-                with st.spinner('Sedang melakukan penjadwalan awal dengan algoritma adaptif dua fase...'):
+                with st.spinner(f'Sedang melakukan penjadwalan awal dengan algoritma {penjadwalan_type}...'):
                     try:
-                        # Ubah dari penjadwalan_awal() ke penjadwalan_adaptif_dua_fase()
-                        penempatan_hasil = st.session_state.sistem.penjadwalan_adaptif_dua_fase()
+                        # Panggil fungsi penjadwalan berdasarkan tipe yang dipilih
+                        if penjadwalan_type == "Distribusi Merata":
+                            penempatan_hasil = st.session_state.sistem.penjadwalan_distribusi_merata()
+                        elif penjadwalan_type == "Prioritas Kapasitas":
+                            penempatan_hasil = st.session_state.sistem.penjadwalan_dengan_prioritas(prioritas="kapasitas")
+                        else:  # Prioritas Stabilitas
+                            penempatan_hasil = st.session_state.sistem.penjadwalan_dengan_prioritas(prioritas="seimbang")
+                        
                         st.session_state.penjadwalan_done = True
+                        st.session_state.last_scheduling_method = penjadwalan_type
+                        st.session_state.gangguan_done = False
+                        st.session_state.penyesuaian_done = False
+                        st.success(f"Penjadwalan awal berhasil dilakukan dengan algoritma {penjadwalan_type}!")
                         
-                        st.success("Penjadwalan awal berhasil dilakukan dengan algoritma adaptif dua fase!")
-                        
-                        # Tampilkan hasil
-                        st.subheader("Distribusi Peserta per Wahana (Awal)")
-                        
-                        # Hitung jumlah peserta per wahana
-                        penempatan_counts = pd.Series(penempatan_hasil).value_counts()
-                        
-                        # Pastikan semua wahana ditampilkan (termasuk yang kosong)
-                        semua_wahana = st.session_state.sistem.wahana_df['Nama Wahana'].tolist()
-                        distribusi = pd.DataFrame({'Nama Wahana': semua_wahana})
-                        distribusi['Jumlah Peserta'] = distribusi['Nama Wahana'].map(penempatan_counts).fillna(0).astype(int)
-                        
-                        # Tambahkan informasi kapasitas
-                        distribusi = distribusi.merge(
-                            st.session_state.sistem.wahana_df[['Nama Wahana', 'Kapasitas Optimal']],
-                            on='Nama Wahana',
-                            how='left'
-                        )
-                        
-                        # Urutkan berdasarkan Jumlah Peserta (descending)
-                        distribusi = distribusi.sort_values(by='Jumlah Peserta', ascending=False)
-                        
-                        # Visualisasi dengan lebih informatif
-                        fig = px.bar(
-                            distribusi,
-                            x='Nama Wahana',
-                            y='Jumlah Peserta',
-                            title='Distribusi Peserta per Wahana',
-                            text='Jumlah Peserta',  # Show values on bars
-                            color='Jumlah Peserta',
-                            color_continuous_scale='Viridis',
-                            labels={'Jumlah Peserta': 'Jumlah Peserta'}
-                        )
-                        
-                        # Tambahkan garis kapasitas maksimum
-                        for i, row in distribusi.iterrows():
-                            fig.add_shape(
-                                type="line",
-                                x0=i-0.4,
-                                y0=row['Kapasitas Optimal'],
-                                x1=i+0.4,
-                                y1=row['Kapasitas Optimal'],
-                                line=dict(color="red", width=2, dash="dash"),
-                            )
-                        
-                        fig.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Simpan hasil di session state
-                        st.session_state.distribusi_awal = distribusi
-                        
-                        # Tampilkan statistik kualitas penjadwalan
-                        if hasattr(st.session_state.sistem, 'kualitas_penjadwalan'):
-                            kualitas = st.session_state.sistem.kualitas_penjadwalan
-                            st.subheader("Kualitas Penjadwalan")
-                            col1, col2 = st.columns(2)
-                            col1.metric("Rata-rata Skor Kecocokan", f"{kualitas['rata_rata_skor']:.1f}/100")
-                            col2.info(f"**Interpretasi**: {kualitas['interpretasi']}")
-                        
-                        if hasattr(st.session_state.sistem, 'peserta_tidak_tertempatkan') and st.session_state.sistem.peserta_tidak_tertempatkan:
-                            st.warning(f"{len(st.session_state.sistem.peserta_tidak_tertempatkan)} peserta tidak dapat ditempatkan karena kapasitas tidak mencukupi.")
+                        # Perhitungan metrik kualitas dipindahkan ke dalam fungsi penjadwalan masing-masing
+                        # Pastikan fungsi-fungsi tersebut melakukan:
+                        # 1. self.hitung_rata_rata_skor()
+                        # 2. self.hitung_deviasi_kecocokan() (untuk Distribusi Merata)
                     except Exception as e:
                         st.error(f"Gagal melakukan penjadwalan: {str(e)}")
                         import traceback
@@ -879,10 +1367,19 @@ def main():
                     wahana_stats['Match'] = pd.to_numeric(wahana_stats['Match'], errors='coerce').fillna(0)
                     wahana_stats['Total_Peserta'] = pd.to_numeric(wahana_stats['Total_Peserta'], errors='coerce').fillna(0)
                     
-                    # Now calculate the percentage safely
+                    # Now calculate the percentage safely using built-in round() function
                     wahana_stats['Persentase_Match'] = wahana_stats.apply(
-                        lambda x: (x['Match'] / x['Total_Peserta'] * 100).round(1) 
-                                if x['Total_Peserta'] > 0 else 0, 
+                        lambda x: round(float(x['Match']) / float(x['Total_Peserta']) * 100, 1) 
+                                if float(x['Total_Peserta']) > 0 else 0.0, 
+                        axis=1
+                    )
+                    wahana_stats['Persentase_Match'] = wahana_stats['Persentase_Match'].apply(lambda x: f"{x:.1f}%")
+                except Exception as e:
+                    st.error(f"Error calculating match percentages: {str(e)}")
+                    # Fallback implementation
+                    wahana_stats['Persentase_Match'] = wahana_stats.apply(
+                        lambda x: '0.0%' if x['Total_Peserta'] == 0 
+                                else f"{round(float(x['Match'])/float(x['Total_Peserta'])*100, 1):.1f}%", 
                         axis=1
                     )
                     wahana_stats['Persentase_Match'] = wahana_stats['Persentase_Match'].map('{:.1f}%'.format)
@@ -961,6 +1458,57 @@ def main():
                     file_name="hasil_penjadwalan_awal.csv",
                     mime="text/csv",
                 )
+                
+                # Tambahkan di bagian hasil penjadwalan awal
+                if hasattr(st.session_state.sistem, 'deviasi_kecocokan'):
+                    deviasi = st.session_state.sistem.deviasi_kecocokan
+                    
+                    st.subheader("Analisis Keseimbangan Skor Kecocokan")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    col1.metric("Standar Deviasi", f"{deviasi['std_dev']:.2f}")
+                    col2.metric("Range Skor", f"{deviasi['min_skor']:.1f} - {deviasi['max_skor']:.1f}")
+                    col3.metric("Selisih Min-Max", f"{deviasi['range_skor']:.1f}")
+                    
+                    # Visualisasi rata-rata skor kecocokan per wahana
+                    if deviasi['rata_rata_per_wahana']:
+                        st.subheader("Rata-rata Skor Kecocokan Per Wahana")
+                        skor_df = pd.DataFrame({
+                            'Wahana': list(deviasi['rata_rata_per_wahana'].keys()),
+                            'Rata-rata Skor': list(deviasi['rata_rata_per_wahana'].values())
+                        }).sort_values('Rata-rata Skor', ascending=False)
+                        
+                        fig = px.bar(
+                            skor_df,
+                            x='Wahana',
+                            y='Rata-rata Skor',
+                            title='Distribusi Rata-rata Skor Kecocokan per Wahana',
+                            color='Rata-rata Skor',
+                            color_continuous_scale='Viridis',
+                            text='Rata-rata Skor'
+                        )
+                        
+                        # Tambahkan garis rata-rata keseluruhan
+                        mean_global = sum(deviasi['rata_rata_per_wahana'].values()) / len(deviasi['rata_rata_per_wahana'])
+                        fig.add_shape(
+                            type="line",
+                            x0=-0.5,
+                            y0=mean_global,
+                            x1=len(skor_df)-0.5,
+                            y1=mean_global,
+                            line=dict(color="red", width=2, dash="dash"),
+                        )
+                        
+                        fig.add_annotation(
+                            x=0,
+                            y=mean_global,
+                            text=f"Rata-rata Global ({mean_global:.1f})",
+                            showarrow=False,
+                            yshift=10
+                        )
+                        
+                        fig.update_layout(xaxis_tickangle=-45)
+                        st.plotly_chart(fig, use_container_width=True)
             
     with tab3:
         st.header("Simulasi Gangguan")
@@ -1275,15 +1823,41 @@ def main():
             # Tombol untuk melakukan penyesuaian (hanya tampilkan jika belum dilakukan penyesuaian)
             if not st.session_state.penyesuaian_done:
                 col1, col2 = st.columns([1, 3])
+                
                 with col1:
+                    redistribusi_type = st.radio(
+                        "Pilih Prioritas Redistribusi:", 
+                        ["Prioritas Stabilitas", "Prioritas Preferensi", "Pemindahan Minimal"],
+                        help="Stabilitas: Prioritaskan keseimbangan rasio pesien:peserta\n"
+                            "Preferensi: Prioritaskan kesesuaian preferensi peserta\n"
+                            "Minimal: Hanya pindahkan peserta dari wahana yang tutup"
+                    )
+                    
+                    # Add a unique key to button
                     redistribution_button = st.button("Lakukan Penyesuaian Penempatan", 
                                                     use_container_width=True, 
-                                                    type="primary")
+                                                    type="primary",
+                                                    key="redistribution_button_unique")  # Added unique key
+                
+                with col2:
+                    st.info(
+                        "**Prioritas Stabilitas**: Utamakan keseimbangan rasio pasien:peserta di semua wahana.\n\n"
+                        "**Prioritas Preferensi**: Utamakan kesesuaian preferensi peserta meskipun beberapa wahana mungkin tidak stabil.\n\n"
+                        "**Pemindahan Minimal**: Hanya pindahkan peserta dari wahana yang tutup, minimal perubahan."
+                    )
                 
                 if redistribution_button:
                     with st.spinner('Sedang menyesuaikan penempatan berdasarkan kondisi gangguan...'):
                         try:
-                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif()
+                            # Konversi pilihan radio button ke parameter fungsi
+                            if redistribusi_type == "Prioritas Stabilitas":
+                                prioritas = "stabilitas"
+                            elif redistribusi_type == "Prioritas Preferensi":
+                                prioritas = "preferensi"
+                            else:  # Pemindahan Minimal
+                                prioritas = "minimal"
+                            
+                            penempatan_akhir = st.session_state.sistem.redistribusi_adaptif(prioritas=prioritas)
                             st.session_state.penyesuaian_done = True
                             st.success("✅ Penyesuaian penempatan berhasil dilakukan!")
                         except Exception as e:
